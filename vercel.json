@@ -1,7 +1,6 @@
 {
     "env": {
-      "DATABASE_PATH": "/tmp/mcp_inbox.db",
-      "FORCE_MOCK": "true"
+      "DATABASE_PATH": "/tmp/mcp_inbox.db"
     },
     "builds": [
       { "src": "ui/server.py", "use": "@vercel/python" }
