@@ -236,6 +236,11 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "index.html")
 
 
+@app.get("/health")
+async def health() -> JSONResponse:
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/status")
 async def get_status() -> JSONResponse:
     """Return platform connection status and demo mode flags."""

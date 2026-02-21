@@ -4,9 +4,9 @@
       "FORCE_MOCK": "true"
     },
     "builds": [
-      { "src": "api/index.py", "use": "@vercel/python" }
+      { "src": "ui/server.py", "use": "@vercel/python" }
     ],
     "routes": [
-      { "src": "/(.*)", "dest": "api/index.py" }
+      { "src": "/(.*)", "dest": "ui/server.py" }
     ]
   }

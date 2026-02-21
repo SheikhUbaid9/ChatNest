@@ -2,6 +2,8 @@
    MCP Inbox — Frontend Application
    ═══════════════════════════════════════════════════ */
 
+const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
+
 const API = {
   status:       '/api/status',
   all:          '/api/messages/all',
@@ -16,7 +18,7 @@ const API = {
   sendReply:    '/api/send-reply',
   draftReply:   '/api/draft-reply',
   ollamaStatus: '/api/ollama/status',
-  wsToolLog:    `ws://${location.host}/ws/tool-log`,
+  wsToolLog:    `${WS_PROTO}://${location.host}/ws/tool-log`,
 };
 
 /* ── State ─────────────────────────────────────────── */
