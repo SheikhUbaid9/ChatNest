@@ -1,0 +1,12 @@
+{
+    "env": {
+      "DATABASE_PATH": "/tmp/mcp_inbox.db",
+      "FORCE_MOCK": "true"
+    },
+    "builds": [
+      { "src": "api/index.py", "use": "@vercel/python" }
+    ],
+    "routes": [
+      { "src": "/(.*)", "dest": "api/index.py" }
+    ]
+  }
