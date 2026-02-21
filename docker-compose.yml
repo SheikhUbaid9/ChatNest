@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────
+#  MCP Inbox — Docker Compose
+#
+#  Demo mode (no credentials needed):
+#    docker compose up
+#
+#  With your own Gmail/Telegram credentials:
+#    1. Copy .env.example → .env and fill in your values
+#    2. Place your credentials.json and token.json in ./data/
+#    3. docker compose up
+# ─────────────────────────────────────────────
+
+services:
+  mcp-inbox:
+    build: .
+    ports:
+      - "8010:8000"
+    env_file:
+      # Copy .env.example to .env and fill in your own values.
+      # If .env doesn't exist the app runs in demo mode automatically.
+      - path: .env
+        required: false
+    environment:
+      # Point credential paths to the /app/data volume
+      GMAIL_CREDENTIALS_PATH: /app/data/credentials.json
+      GMAIL_TOKEN_PATH: /app/data/token.json
+      TELEGRAM_SESSION_PATH: /app/data/telegram_personal.session
+      DATABASE_PATH: /app/data/mcp_inbox.db
+    volumes:
+      # Persists the database and any credential files you place here.
+      # Drop your own credentials.json / token.json into ./data/ on the host.
+      - ./data:/app/data
+    restart: unless-stopped

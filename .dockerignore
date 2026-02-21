@@ -1,0 +1,29 @@
+# ── Sensitive credentials — NEVER bake into the image ──
+.env
+token.json
+credentials.json
+client_secret_*.json
+*.session
+telegram_personal.session
+
+# ── Runtime data ──
+mcp_inbox.db
+data/
+
+# ── Python cache ──
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# ── Dev/IDE ──
+.idea/
+.vscode/
+*.iml
+
+# ── Git ──
+.git/
+.gitignore
+
+# ── Logs ──
+*.log

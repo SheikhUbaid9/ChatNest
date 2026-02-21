@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCP Inbox — AI Communication Hub</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📬</text></svg>" />
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ══════════════════════════════════════════════
+       HEADER
+       ══════════════════════════════════════════════ -->
+  <header class="header">
+
+    <div class="header-left">
+      <div class="logo">
+        <div class="logo-icon">📬</div>
+        <span class="logo-text">MCP Inbox</span>
+      </div>
+      <span class="demo-badge" id="demo-badge">
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+          <circle cx="4" cy="4" r="3"/>
+        </svg>
+        Demo
+      </span>
+    </div>
+
+    <div class="header-center">
+      <!-- Gmail status pill -->
+      <div class="status-pill gmail" id="status-gmail" title="Gmail">
+        <span class="status-dot demo"></span>
+        <span>📧</span>
+        <span class="status-label">Demo</span>
+      </div>
+      <!-- Slack status pill -->
+      <div class="status-pill slack" id="status-slack" title="Slack">
+        <span class="status-dot demo"></span>
+        <span>💬</span>
+        <span class="status-label">Demo</span>
+      </div>
+      <!-- Telegram status pill -->
+      <div class="status-pill telegram" id="status-telegram" title="Telegram">
+        <span class="status-dot demo"></span>
+        <span>✈️</span>
+        <span class="status-label">Demo</span>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <button class="btn-icon" id="refresh-btn" title="Refresh all platforms">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+    </div>
+
+  </header>
+
+  <!-- ══════════════════════════════════════════════
+       SIDEBAR
+       ══════════════════════════════════════════════ -->
+  <aside class="sidebar">
+
+    <div class="sidebar-label">Platforms</div>
+
+    <!-- All -->
+    <div class="platform-btn all active" data-platform="all">
+      <div class="platform-icon all">📬</div>
+      <div class="platform-info">
+        <div class="platform-name">All Messages</div>
+        <div class="platform-sub">Combined inbox</div>
+      </div>
+      <span class="unread-badge" id="badge-all" style="display:none">0</span>
+    </div>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-label">Connected</div>
+
+    <!-- Gmail -->
+    <div class="platform-btn gmail" data-platform="gmail">
+      <div class="platform-icon gmail">📧</div>
+      <div class="platform-info">
+        <div class="platform-name">Gmail</div>
+        <div class="platform-sub">Unread emails</div>
+      </div>
+      <span class="unread-badge gmail" id="badge-gmail" style="display:none">0</span>
+    </div>
+
+    <!-- Slack -->
+    <div class="platform-btn slack" data-platform="slack">
+      <div class="platform-icon slack">💬</div>
+      <div class="platform-info">
+        <div class="platform-name">Slack</div>
+        <div class="platform-sub">Channel messages</div>
+      </div>
+      <span class="unread-badge slack" id="badge-slack" style="display:none">0</span>
+    </div>
+
+    <!-- Telegram -->
+    <div class="platform-btn telegram" data-platform="telegram">
+      <div class="platform-icon telegram">✈️</div>
+      <div class="platform-info">
+        <div class="platform-name">Telegram</div>
+        <div class="platform-sub">Bot messages</div>
+      </div>
+      <span class="unread-badge telegram" id="badge-telegram" style="display:none">0</span>
+    </div>
+
+    <!-- Footer total -->
+    <div class="sidebar-footer">
+      <div class="total-count">
+        <span class="total-count-label">Total unread</span>
+        <span class="total-count-value" id="total-unread">—</span>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ══════════════════════════════════════════════
+       MESSAGES PANEL
+       ══════════════════════════════════════════════ -->
+  <main class="messages-panel">
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+      <div class="tab active" data-platform="all">All</div>
+      <div class="tab" data-platform="gmail">📧 Gmail</div>
+      <div class="tab" data-platform="slack">💬 Slack</div>
+      <div class="tab" data-platform="telegram">✈️ Telegram</div>
+    </div>
+
+    <!-- Messages list -->
+    <div class="messages-list" id="messages-list">
+      <!-- Skeleton loaders shown while fetching -->
+      <div class="skeleton-card">
+        <div class="skeleton skeleton-avatar"></div>
+        <div class="skeleton-content">
+          <div class="skeleton skeleton-line w-60"></div>
+          <div class="skeleton skeleton-line w-80"></div>
+          <div class="skeleton skeleton-line w-40"></div>
+        </div>
+      </div>
+      <div class="skeleton-card">
+        <div class="skeleton skeleton-avatar"></div>
+        <div class="skeleton-content">
+          <div class="skeleton skeleton-line w-80"></div>
+          <div class="skeleton skeleton-line w-60"></div>
+          <div class="skeleton skeleton-line w-40"></div>
+        </div>
+      </div>
+      <div class="skeleton-card">
+        <div class="skeleton skeleton-avatar"></div>
+        <div class="skeleton-content">
+          <div class="skeleton skeleton-line w-40"></div>
+          <div class="skeleton skeleton-line w-80"></div>
+          <div class="skeleton skeleton-line w-60"></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ══════════════════════════════════════════════
+       TOOL LOG PANEL
+       ══════════════════════════════════════════════ -->
+  <aside class="tool-log">
+
+    <div class="panel-header">
+      <div class="panel-title">
+        <span id="ws-dot" class="ws-indicator"></span>
+        ⚡ Tool Log
+      </div>
+      <span class="log-count" id="log-count">0 calls</span>
+    </div>
+
+    <div class="tool-log-list" id="tool-log-list">
+      <!-- Populated by WebSocket / JS -->
+      <div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;">
+        Connecting to live feed…
+      </div>
+    </div>
+
+  </aside>
+
+</div><!-- /.app -->
+
+<!-- Toast container (injected by JS) -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,739 @@
+/* ═══════════════════════════════════════════════════
+   MCP Inbox — Frontend Application
+   ═══════════════════════════════════════════════════ */
+
+const API = {
+  status:       '/api/status',
+  all:          '/api/messages/all',
+  gmail:        '/api/messages/gmail',
+  slack:        '/api/messages/slack',
+  telegram:     '/api/messages/telegram',
+  unread:       '/api/unread-counts',
+  markRead:     '/api/mark-read',
+  refresh:      '/api/refresh',
+  toolLog:      '/api/tool-log',
+  summarize:    '/api/summarize',
+  sendReply:    '/api/send-reply',
+  draftReply:   '/api/draft-reply',
+  ollamaStatus: '/api/ollama/status',
+  wsToolLog:    `ws://${location.host}/ws/tool-log`,
+};
+
+/* ── State ─────────────────────────────────────────── */
+const state = {
+  activeTab:      'all',
+  activePlatform: 'all',
+  messages:       [],
+  expandedCard:   null,
+  unreadCounts:   { gmail: 0, slack: 0, telegram: 0 },
+  demoMode:       true,
+  wsConnected:    false,
+  loading:        false,
+  replyTarget:    null,
+};
+
+/* ── Platform metadata ─────────────────────────────── */
+const PLATFORMS = {
+  gmail:    { icon: '📧', label: 'Gmail',    color: '#EA4335' },
+  slack:    { icon: '💬', label: 'Slack',    color: '#9B59B6' },
+  telegram: { icon: '✈️',  label: 'Telegram', color: '#2AABEE' },
+};
+
+/* ── DOM refs ──────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const $$ = sel => document.querySelectorAll(sel);
+
+/* ══════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', async () => {
+  setupEventListeners();
+  connectWebSocket();
+  await loadStatus();
+  await loadMessages();
+  // Poll unread counts every 30 s
+  setInterval(loadStatus, 30_000);
+});
+
+/* ══════════════════════════════════════════════════
+   API HELPERS
+   ══════════════════════════════════════════════════ */
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/* ══════════════════════════════════════════════════
+   STATUS / UNREAD COUNTS
+   ══════════════════════════════════════════════════ */
+async function loadStatus() {
+  try {
+    const data = await apiFetch(API.status);
+    state.demoMode = data.demo_mode;
+    state.unreadCounts = {
+      gmail:    data.platforms.gmail.unread,
+      slack:    data.platforms.slack.unread,
+      telegram: data.platforms.telegram.unread,
+    };
+    renderStatus(data);
+    renderSidebarCounts();
+  } catch (e) {
+    console.warn('Status fetch failed:', e);
+  }
+}
+
+function renderStatus(data) {
+  // Demo badge
+  const demoBadge = $('demo-badge');
+  if (demoBadge) demoBadge.style.display = data.demo_mode ? 'inline-flex' : 'none';
+
+  // Status pills in header
+  for (const [platform, info] of Object.entries(data.platforms)) {
+    const pill = $(`status-${platform}`);
+    if (!pill) continue;
+    const dot = pill.querySelector('.status-dot');
+    if (dot) {
+      dot.className = 'status-dot ' + (info.connected ? 'connected' : 'demo');
+    }
+    const label = pill.querySelector('.status-label');
+    if (label) label.textContent = info.connected ? 'Live' : 'Demo';
+  }
+}
+
+function renderSidebarCounts() {
+  const total = Object.values(state.unreadCounts).reduce((a, b) => a + b, 0);
+
+  for (const platform of ['gmail', 'slack', 'telegram']) {
+    const badge = $(`badge-${platform}`);
+    if (!badge) continue;
+    const count = state.unreadCounts[platform];
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'flex' : 'none';
+  }
+
+  const totalEl = $('total-unread');
+  if (totalEl) totalEl.textContent = total;
+
+  // All badge
+  const allBadge = $('badge-all');
+  if (allBadge) {
+    allBadge.textContent = total;
+    allBadge.style.display = total > 0 ? 'flex' : 'none';
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   MESSAGES
+   ══════════════════════════════════════════════════ */
+async function loadMessages(platform = state.activeTab) {
+  state.loading = true;
+  showSkeletons();
+
+  try {
+    const url = platform === 'all' ? API.all : API[platform];
+    const data = await apiFetch(url + '?limit=50');
+    state.messages = data.messages || [];
+    renderMessages();
+  } catch (e) {
+    console.error('Messages fetch failed:', e);
+    showError('Failed to load messages');
+  } finally {
+    state.loading = false;
+  }
+}
+
+function renderMessages() {
+  const list = $('messages-list');
+  if (!list) return;
+
+  if (state.messages.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">📭</div>
+        <div class="empty-state-title">All caught up!</div>
+        <div class="empty-state-sub">No messages in this view.</div>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = state.messages.map((msg, i) => buildCard(msg, i)).join('');
+}
+
+function buildCard(msg, index) {
+  const p = msg.platform;
+  const meta = PLATFORMS[p] || { icon: '💌', label: p };
+  const initials = getInitials(msg.sender);
+  const timeStr = relativeTime(msg.timestamp);
+  const subject = msg.subject || msg.channel || '';
+  const preview = msg.preview || '';
+  const body = msg.body || preview;
+  const isUnread = msg.is_unread;
+
+  return `
+    <div class="message-card ${p} ${isUnread ? 'unread' : ''}" data-id="${esc(msg.id)}">
+      <div class="card-header">
+        <div class="avatar ${p}">${initials}</div>
+        <div class="card-meta">
+          <div class="card-top">
+            <span class="sender-name">${esc(msg.sender)}</span>
+            <div class="card-right">
+              <span class="platform-tag ${p}">${meta.icon} ${meta.label}</span>
+              <span class="timestamp">${timeStr}</span>
+              ${isUnread ? '<span class="unread-dot"></span>' : ''}
+            </div>
+          </div>
+          ${subject ? `<div class="subject-line">${esc(subject)}</div>` : ''}
+          <div class="preview-text">${esc(preview)}</div>
+        </div>
+      </div>
+      <div class="card-body" id="body-${esc(msg.id)}">
+        <div class="message-body-text">${esc(body)}</div>
+        <div class="card-actions">
+          <button class="btn primary btn-reply" data-id="${esc(msg.id)}">↩ Reply</button>
+          <button class="btn success btn-read" data-id="${esc(msg.id)}">✓ Mark Read</button>
+          <button class="btn btn-summarize" data-id="${esc(msg.id)}">✦ Summarize</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function findCard(id) {
+  return Array.from($$('.message-card')).find(c => c.dataset.id === id) || null;
+}
+
+function toggleCard(id) {
+  const card = findCard(id);
+  if (!card) return;
+  const body = card.querySelector('.card-body');
+  if (!body) return;
+
+  const isExpanded = card.dataset.expanded === '1';
+
+  // Collapse any other expanded card
+  $$('.message-card').forEach(c => {
+    if (c.dataset.expanded === '1') {
+      c.dataset.expanded = '';
+      c.classList.remove('expanded');
+      const b = c.querySelector('.card-body');
+      if (b) b.style.display = 'none';
+    }
+  });
+
+  if (!isExpanded) {
+    card.dataset.expanded = '1';
+    card.classList.add('expanded');
+    body.style.display = 'block';
+    state.expandedCard = id;
+  } else {
+    state.expandedCard = null;
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   ACTIONS
+   ══════════════════════════════════════════════════ */
+async function doMarkRead(msgId) {
+  try {
+    await apiFetch(API.markRead, {
+      method: 'POST',
+      body: JSON.stringify({ message_id: msgId }),
+    });
+
+    // Update UI
+    const card = findCard(msgId);
+    if (card) {
+      card.classList.remove('unread');
+      const dot = card.querySelector('.unread-dot');
+      if (dot) dot.remove();
+    }
+
+    // Decrement sidebar badge
+    const msg = state.messages.find(m => m.id === msgId);
+    if (msg && msg.is_unread) {
+      msg.is_unread = false;
+      state.unreadCounts[msg.platform] = Math.max(0, (state.unreadCounts[msg.platform] || 1) - 1);
+      renderSidebarCounts();
+    }
+
+    showToast('✓ Marked as read', 'success');
+  } catch (e) {
+    showToast('Failed to mark as read', 'error');
+  }
+}
+
+async function doSummarize(msgId) {
+  const msg = state.messages.find(m => m.id === msgId);
+  if (!msg) return;
+
+  // Always expand the card so the summary is visible
+  const card = findCard(msgId);
+  const cardBody = card?.querySelector('.card-body');
+  if (!card || !cardBody) return;
+
+  // Expand if collapsed
+  if (card.dataset.expanded !== '1') {
+    $$('.message-card').forEach(c => {
+      if (c.dataset.expanded === '1') {
+        c.dataset.expanded = '';
+        c.classList.remove('expanded');
+        const b = c.querySelector('.card-body');
+        if (b) b.style.display = 'none';
+      }
+    });
+    card.dataset.expanded = '1';
+    card.classList.add('expanded');
+    cardBody.style.display = 'block';
+  }
+
+  // Show loading placeholder where summary will appear
+  cardBody.querySelector('.summary-result')?.remove();
+  const placeholder = document.createElement('div');
+  placeholder.className = 'summary-result';
+  placeholder.innerHTML = `
+    <div class="summary-box summary-loading">
+      <div class="summary-header">
+        <span class="summary-icon">✦</span>
+        <span class="summary-label">AI Summary</span>
+        <span class="summary-model" style="margin-left:auto;opacity:0.5">thinking…</span>
+      </div>
+      <div class="summary-text" style="color:var(--muted)">
+        <span class="calling-pulse">Summarizing with Ollama llama3.2…</span>
+      </div>
+    </div>`;
+  cardBody.insertBefore(placeholder, cardBody.querySelector('.card-actions'));
+
+  const body = msg.body || msg.preview || '(no content)';
+
+  try {
+    const data = await apiFetch(API.summarize, {
+      method: 'POST',
+      body: JSON.stringify({
+        message_id: msg.id,
+        platform:   msg.platform,
+        sender:     msg.sender || '',
+        body:       body,
+      }),
+    });
+
+    // Replace placeholder with real summary
+    cardBody.querySelector('.summary-result')?.remove();
+    const div = document.createElement('div');
+    div.className = 'summary-result';
+    div.innerHTML = `
+      <div class="summary-box">
+        <div class="summary-header">
+          <span class="summary-icon">✦</span>
+          <span class="summary-label">AI Summary</span>
+          <span class="summary-model">${esc(data.model || 'ollama')}</span>
+          ${!data.ollama_running ? '<span class="summary-fallback">extractive</span>' : ''}
+        </div>
+        <div class="summary-text">${esc(data.summary)}</div>
+      </div>`;
+    cardBody.insertBefore(div, cardBody.querySelector('.card-actions'));
+
+    const label = data.ollama_running
+      ? `✦ Summarized with ${data.model}`
+      : '✦ Summary ready (Ollama offline — extractive)';
+    showToast(label, 'success');
+
+  } catch (e) {
+    cardBody.querySelector('.summary-result')?.remove();
+    showToast('Summarization failed — is Ollama running?', 'error');
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   REPLY MODAL
+   ══════════════════════════════════════════════════ */
+function openReplyModal(msgId) {
+  const msg = state.messages.find(m => m.id === msgId);
+  if (!msg) return;
+
+  state.replyTarget = msg;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'reply-modal';
+
+  const to = msg.sender_email || msg.sender || '';
+  const subject = msg.subject || '';
+
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">↩ Reply to ${esc(msg.sender)}</div>
+      <div class="modal-field">
+        <label class="modal-label">To</label>
+        <input class="modal-input" id="reply-to" value="${esc(to)}" placeholder="recipient@example.com" />
+      </div>
+      ${subject ? `
+      <div class="modal-field">
+        <label class="modal-label">Subject</label>
+        <input class="modal-input" id="reply-subject" value="Re: ${esc(subject)}" />
+      </div>` : ''}
+      <div class="modal-field">
+        <label class="modal-label">Message</label>
+        <textarea class="modal-textarea" id="reply-body" placeholder="Write your reply… or click ✦ AI Draft"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="reply-cancel">Cancel</button>
+        <button class="btn" id="reply-ai-draft">✦ AI Draft</button>
+        <button class="btn primary" id="reply-send">↩ Send Reply</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  $('reply-cancel').addEventListener('click', closeModal);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+  $('reply-send').addEventListener('click', sendReply);
+  $('reply-ai-draft').addEventListener('click', aiDraftReply);
+
+  setTimeout(() => { const el = $('reply-body'); if (el) el.focus(); }, 50);
+}
+
+function closeModal() {
+  const modal = $('reply-modal');
+  if (modal) modal.remove();
+  state.replyTarget = null;
+}
+
+async function aiDraftReply() {
+  const msg = state.replyTarget;
+  if (!msg) return;
+
+  const draftBtn = $('reply-ai-draft');
+  if (draftBtn) { draftBtn.textContent = '✦ Drafting…'; draftBtn.disabled = true; }
+
+  try {
+    const data = await apiFetch(API.draftReply, {
+      method: 'POST',
+      body: JSON.stringify({
+        original_body: msg.body || msg.preview || '',
+        platform:      msg.platform,
+        sender:        msg.sender_email || msg.sender || '',
+      }),
+    });
+
+    const textarea = $('reply-body');
+    if (textarea) {
+      if (data.draft) {
+        textarea.value = data.draft;
+        showToast(`✦ AI draft ready (${data.model})`, 'success');
+      } else {
+        showToast('Ollama offline — start it with: ollama serve', 'error');
+      }
+    }
+  } catch (e) {
+    showToast('AI draft failed', 'error');
+  } finally {
+    if (draftBtn) { draftBtn.textContent = '✦ AI Draft'; draftBtn.disabled = false; }
+  }
+}
+
+async function sendReply() {
+  const msg = state.replyTarget;
+  if (!msg) return;
+
+  const body = ($('reply-body')?.value || '').trim();
+  if (!body) { showToast('Please write a message', 'error'); return; }
+
+  const subject = ($('reply-subject')?.value || msg.subject || '').trim();
+
+  const sendBtn = $('reply-send');
+  if (sendBtn) { sendBtn.textContent = 'Sending…'; sendBtn.disabled = true; }
+
+  try {
+    const data = await apiFetch(API.sendReply, {
+      method: 'POST',
+      body: JSON.stringify({
+        message_id:   msg.id,
+        platform:     msg.platform,
+        thread_id:    msg.thread_id || '',
+        sender_email: msg.sender_email || '',
+        subject:      subject,
+        channel:      msg.channel || '',
+        chat_id:      String(msg.chat_id || ''),
+        body:         body,
+      }),
+    });
+
+    const demoNote = data.demo_mode ? ' (Demo Mode)' : '';
+    showToast(`✓ Reply sent${demoNote}`, 'success');
+    closeModal();
+    await doMarkRead(msg.id);
+  } catch (e) {
+    showToast('Failed to send reply', 'error');
+    if (sendBtn) { sendBtn.textContent = '↩ Send Reply'; sendBtn.disabled = false; }
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   TOOL LOG (WebSocket)
+   ══════════════════════════════════════════════════ */
+let ws = null;
+let wsReconnectTimer = null;
+
+function connectWebSocket() {
+  if (ws && ws.readyState === WebSocket.OPEN) return;
+
+  try {
+    ws = new WebSocket(API.wsToolLog);
+
+    ws.onopen = () => {
+      state.wsConnected = true;
+      updateWsIndicator(true);
+      if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'snapshot') {
+          renderToolLogSnapshot(data.entries || []);
+        } else if (data.type === 'tool_log') {
+          prependLogEntry(data.entry);
+        }
+        // ignore ping
+      } catch (e) { /* ignore parse errors */ }
+    };
+
+    ws.onclose = () => {
+      state.wsConnected = false;
+      updateWsIndicator(false);
+      // Reconnect after 3s
+      wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+    };
+
+    ws.onerror = () => { ws.close(); };
+
+  } catch (e) {
+    // WebSocket not available — fall back to polling
+    setInterval(pollToolLog, 2000);
+  }
+}
+
+async function pollToolLog() {
+  try {
+    const data = await apiFetch(API.toolLog + '?limit=20');
+    renderToolLogSnapshot(data.entries || []);
+  } catch (e) { /* silent */ }
+}
+
+function updateWsIndicator(connected) {
+  const dot = $('ws-dot');
+  if (dot) dot.className = 'ws-indicator ' + (connected ? 'connected' : '');
+}
+
+function renderToolLogSnapshot(entries) {
+  const list = $('tool-log-list');
+  if (!list) return;
+  list.innerHTML = entries.map(buildLogEntry).join('');
+  updateLogCount(entries.length);
+}
+
+function prependLogEntry(entry) {
+  const list = $('tool-log-list');
+  if (!list) return;
+
+  const el = document.createElement('div');
+  el.innerHTML = buildLogEntry(entry);
+  const node = el.firstElementChild;
+  list.insertBefore(node, list.firstChild);
+
+  // Keep max 30 entries
+  while (list.children.length > 30) list.removeChild(list.lastChild);
+
+  updateLogCount(list.children.length);
+}
+
+function buildLogEntry(entry) {
+  const status = entry.status || 'calling';
+  const icon = status === 'done'    ? '✅'
+             : status === 'error'   ? '❌'
+             : '<span class="calling-pulse">⚡</span>';
+
+  const platform = entry.platform || '';
+  const platformTag = platform
+    ? `<span class="log-platform-tag ${platform}">${platform}</span>`
+    : '';
+
+  const duration = entry.duration_ms != null
+    ? `<span class="log-duration">${entry.duration_ms}ms</span>`
+    : '';
+
+  const summary = esc(entry.result_summary || (status === 'calling' ? 'Calling…' : ''));
+  const time = relativeTime(entry.called_at);
+
+  return `
+    <div class="log-entry status-${status}">
+      <div class="log-entry-header">
+        <span class="log-status-icon">${icon}</span>
+        <span class="log-tool-name">${esc(entry.tool_name)}</span>
+        ${platformTag}
+      </div>
+      <div class="log-entry-footer">
+        <span class="log-summary">${summary}</span>
+        ${duration}
+      </div>
+    </div>`;
+}
+
+function updateLogCount(n) {
+  const el = $('log-count');
+  if (el) el.textContent = n + ' calls';
+}
+
+/* ══════════════════════════════════════════════════
+   EVENT LISTENERS
+   ══════════════════════════════════════════════════ */
+function setupEventListeners() {
+  // Single delegated handler for all message card interactions (attached once)
+  const list = $('messages-list');
+  if (list) {
+    list.addEventListener('click', e => {
+      const btn = e.target.closest('.btn');
+      if (btn) {
+        if (btn.classList.contains('btn-reply'))     { openReplyModal(btn.dataset.id); return; }
+        if (btn.classList.contains('btn-read'))      { doMarkRead(btn.dataset.id);     return; }
+        if (btn.classList.contains('btn-summarize')) { doSummarize(btn.dataset.id);    return; }
+        return;
+      }
+      const card = e.target.closest('.message-card');
+      if (card) toggleCard(card.dataset.id);
+    });
+  }
+
+  // Tab bar clicks
+  $$('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const platform = tab.dataset.platform;
+      $$('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      state.activeTab = platform;
+      loadMessages(platform);
+    });
+  });
+
+  // Sidebar platform buttons
+  $$('.platform-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const platform = btn.dataset.platform;
+      $$('.platform-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.activePlatform = platform;
+
+      // Sync tab bar
+      $$('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.platform === platform);
+      });
+
+      state.activeTab = platform;
+      loadMessages(platform);
+    });
+  });
+
+  // Refresh button
+  const refreshBtn = $('refresh-btn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.classList.add('spinning');
+      try {
+        await apiFetch(API.refresh, { method: 'POST' });
+        await loadStatus();
+        await loadMessages();
+        showToast('✓ Refreshed all platforms', 'success');
+      } catch (e) {
+        showToast('Refresh failed', 'error');
+      } finally {
+        refreshBtn.classList.remove('spinning');
+      }
+    });
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   SKELETON LOADERS
+   ══════════════════════════════════════════════════ */
+function showSkeletons(count = 5) {
+  const list = $('messages-list');
+  if (!list) return;
+  list.innerHTML = Array.from({ length: count }, () => `
+    <div class="skeleton-card">
+      <div class="skeleton skeleton-avatar"></div>
+      <div class="skeleton-content">
+        <div class="skeleton skeleton-line w-60"></div>
+        <div class="skeleton skeleton-line w-80"></div>
+        <div class="skeleton skeleton-line w-40"></div>
+      </div>
+    </div>`).join('');
+}
+
+/* ══════════════════════════════════════════════════
+   TOAST NOTIFICATIONS
+   ══════════════════════════════════════════════════ */
+function showToast(message, type = '') {
+  let container = $('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add('leaving');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+function showError(msg) {
+  const list = $('messages-list');
+  if (list) list.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">⚠️</div>
+      <div class="empty-state-title">Something went wrong</div>
+      <div class="empty-state-sub">${esc(msg)}</div>
+    </div>`;
+}
+
+/* ══════════════════════════════════════════════════
+   UTILITIES
+   ══════════════════════════════════════════════════ */
+function esc(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getInitials(name) {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase();
+}
+
+function relativeTime(isoStr) {
+  if (!isoStr) return '';
+  const now = Date.now();
+  const then = new Date(isoStr).getTime();
+  const diff = Math.floor((now - then) / 1000);
+
+  if (diff < 5)   return 'just now';
+  if (diff < 60)  return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
