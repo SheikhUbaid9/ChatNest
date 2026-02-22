@@ -35,6 +35,11 @@
   --transition:   all 0.2s cubic-bezier(0.4,0,0.2,1);
 }
 
+/* Ensure hidden elements stay hidden when component styles set display. */
+[hidden] {
+  display: none !important;
+}
+
 /* ── Reset ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
