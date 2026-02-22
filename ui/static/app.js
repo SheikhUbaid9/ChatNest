@@ -328,7 +328,7 @@ async function doSummarize(msgId) {
         <span class="summary-model" style="margin-left:auto;opacity:0.5">thinking…</span>
       </div>
       <div class="summary-text" style="color:var(--muted)">
-        <span class="calling-pulse">Summarizing with Ollama llama3.2…</span>
+        <span class="calling-pulse">Summarizing with AI…</span>
       </div>
     </div>`;
   cardBody.insertBefore(placeholder, cardBody.querySelector('.card-actions'));
@@ -364,12 +364,12 @@ async function doSummarize(msgId) {
 
     const label = data.ollama_running
       ? `✦ Summarized with ${data.model}`
-      : '✦ Summary ready (Ollama offline — extractive)';
+      : '✦ Summary ready (AI offline — extractive)';
     showToast(label, 'success');
 
   } catch (e) {
     cardBody.querySelector('.summary-result')?.remove();
-    showToast('Summarization failed — is Ollama running?', 'error');
+    showToast('Summarization failed', 'error');
   }
 }
 
@@ -449,9 +449,12 @@ async function aiDraftReply() {
     if (textarea) {
       if (data.draft) {
         textarea.value = data.draft;
-        showToast(`✦ AI draft ready (${data.model})`, 'success');
+        const label = data.ollama_running
+          ? `✦ AI draft ready (${data.model})`
+          : '✦ Draft ready (template fallback)';
+        showToast(label, 'success');
       } else {
-        showToast('Ollama offline — start it with: ollama serve', 'error');
+        showToast(data.message || 'AI draft unavailable', 'error');
       }
     }
   } catch (e) {

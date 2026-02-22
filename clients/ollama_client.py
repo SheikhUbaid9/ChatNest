@@ -12,13 +12,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import AsyncGenerator
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE = "http://localhost:11434"
+# Supports remote/self-hosted Ollama in deployed environments.
+OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 DEFAULT_MODEL = "llama3.2:3b"
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
