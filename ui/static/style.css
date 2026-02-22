@@ -1054,13 +1054,14 @@ body {
   }
 
   .app {
-    grid-template-rows: auto minmax(0, 1fr) auto auto;
-    grid-template-columns: minmax(0, 1fr);
+    min-height: 100dvh;
+    height: 100dvh;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 132px;
     grid-template-areas:
-      "header"
-      "messages"
-      "sidebar"
-      "toollog";
+      "header header"
+      "sidebar sidebar"
+      "messages toollog";
   }
 
   .header {
@@ -1107,7 +1108,8 @@ body {
   }
 
   .messages-panel {
-    min-height: 56vh;
+    min-height: 0;
+    border-right: 1px solid var(--border);
   }
 
   .tab-bar {
@@ -1149,14 +1151,15 @@ body {
   }
 
   .sidebar {
+    grid-area: sidebar;
     display: flex;
     flex-wrap: nowrap;
     gap: 8px;
     overflow-x: auto;
     overflow-y: hidden;
-    border-right: none;
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
+    border-right: none;
     padding: 10px;
   }
 
@@ -1171,7 +1174,7 @@ body {
   }
 
   .platform-btn {
-    min-width: 210px;
+    min-width: 185px;
     flex: 0 0 auto;
     padding: 9px;
   }
@@ -1182,13 +1185,49 @@ body {
     text-overflow: ellipsis;
   }
 
+  .tool-log {
+    grid-area: toollog;
+    min-height: 0;
+    border-top: none;
+    border-left: 1px solid var(--border);
+  }
+
   .tool-log .panel-header {
-    padding: 10px 12px;
+    padding: 10px 8px;
+  }
+
+  .panel-title {
+    font-size: 11px;
+    gap: 5px;
+  }
+
+  .log-count {
+    display: none;
   }
 
   .tool-log-list {
+    padding: 6px;
+    max-height: none;
+  }
+
+  .log-entry {
     padding: 8px;
-    max-height: 190px;
+  }
+
+  .log-entry-footer {
+    margin-top: 4px;
+  }
+
+  .log-tool-name {
+    font-size: 10px;
+  }
+
+  .log-summary {
+    font-size: 10px;
+  }
+
+  .log-duration {
+    display: none;
   }
 
   .modal-overlay {
@@ -1226,6 +1265,10 @@ body {
 }
 
 @media (max-width: 420px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr) 116px;
+  }
+
   .logo-text {
     display: none;
   }
@@ -1237,6 +1280,10 @@ body {
 
   .platform-name {
     font-size: 12px;
+  }
+
+  .platform-btn {
+    min-width: 160px;
   }
 
   .platform-sub {
