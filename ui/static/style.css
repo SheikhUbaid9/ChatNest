@@ -974,3 +974,276 @@ body {
   color: var(--text-2);
   line-height: 1.6;
 }
+
+/* Responsive layout */
+@media (max-width: 1200px) {
+  .app {
+    grid-template-columns: 200px 1fr 260px;
+  }
+
+  .header {
+    padding: 0 14px;
+  }
+
+  .tab-bar {
+    padding-inline: 12px;
+  }
+
+  .messages-list {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 980px) {
+  body {
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .app {
+    height: auto;
+    min-height: 100vh;
+    grid-template-rows: 56px auto auto;
+    grid-template-columns: 220px 1fr;
+    grid-template-areas:
+      "header header"
+      "sidebar messages"
+      "toollog toollog";
+  }
+
+  .messages-panel {
+    min-height: 460px;
+  }
+
+  .tool-log {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    min-height: 220px;
+  }
+
+  .tool-log-list {
+    max-height: 260px;
+  }
+
+  .tab-bar {
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+
+  .tab-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .card-top {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .card-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 920px) {
+  body {
+    font-size: 13px;
+  }
+
+  .app {
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "header"
+      "messages"
+      "sidebar"
+      "toollog";
+  }
+
+  .header {
+    padding: 8px 10px;
+    min-height: 56px;
+    height: auto;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .header-left {
+    min-width: 0;
+  }
+
+  .logo-text {
+    font-size: 16px;
+  }
+
+  .header-center {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .header-center::-webkit-scrollbar {
+    display: none;
+  }
+
+  .header-right {
+    margin-left: auto;
+  }
+
+  .status-pill {
+    padding: 4px 8px;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  .status-label {
+    display: none;
+  }
+
+  .messages-panel {
+    min-height: 56vh;
+  }
+
+  .tab-bar {
+    padding: 10px 10px 0;
+    gap: 6px;
+  }
+
+  .tab {
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+
+  .messages-list {
+    padding: 10px;
+    overflow-y: auto;
+  }
+
+  .message-card {
+    padding: 12px;
+  }
+
+  .sender-name,
+  .subject-line {
+    white-space: normal;
+  }
+
+  .platform-tag,
+  .timestamp {
+    font-size: 10px;
+  }
+
+  .card-actions {
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+
+  .sidebar {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 10px;
+  }
+
+  .sidebar::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .sidebar-label,
+  .sidebar-divider,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .platform-btn {
+    min-width: 210px;
+    flex: 0 0 auto;
+    padding: 9px;
+  }
+
+  .platform-sub {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tool-log .panel-header {
+    padding: 10px 12px;
+  }
+
+  .tool-log-list {
+    padding: 8px;
+    max-height: 190px;
+  }
+
+  .modal-overlay {
+    align-items: flex-end;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100vh - 10px);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    padding: 14px;
+    overflow-y: auto;
+  }
+
+  .modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .modal-actions .btn {
+    width: 100%;
+  }
+
+  .toast-container {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .toast {
+    max-width: none;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .logo-text {
+    display: none;
+  }
+
+  .demo-badge {
+    padding: 2px 6px;
+    font-size: 10px;
+  }
+
+  .platform-name {
+    font-size: 12px;
+  }
+
+  .platform-sub {
+    display: none;
+  }
+
+  .tab {
+    padding: 7px 9px;
+  }
+}
