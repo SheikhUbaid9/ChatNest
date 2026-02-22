@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════
-   MCP Inbox — Frontend Application
+   ChatNest — Frontend Application
    ═══════════════════════════════════════════════════ */
 
 const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';

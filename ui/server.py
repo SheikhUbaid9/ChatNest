@@ -1,5 +1,5 @@
 """
-ui/server.py — FastAPI backend for MCP Inbox UI.
+ui/server.py — FastAPI backend for ChatNest UI.
 
 REST endpoints:
   GET  /                        → serve index.html
@@ -148,7 +148,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Startup prefetch failed: %s", exc)
     # Start background poller
     task = asyncio.create_task(_poll_tool_log())
-    logger.info("MCP Inbox UI server ready")
+    logger.info("ChatNest UI server ready")
     yield
     task.cancel()
 
@@ -156,7 +156,7 @@ async def lifespan(app: FastAPI):
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="MCP Inbox",
+    title="ChatNest",
     description="AI Communication Hub — Gmail · Slack · Telegram",
     version="1.0.0",
     lifespan=lifespan,
