@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 AI_PROVIDER = os.getenv("AI_PROVIDER", "auto").strip().lower()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 
 try:
     import google.generativeai as genai
