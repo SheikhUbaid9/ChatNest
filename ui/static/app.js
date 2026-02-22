@@ -141,11 +141,21 @@ function applyAuthUI(session) {
 }
 
 async function completeDemoLogin(session) {
-  saveDemoAuth(session);
   applyAuthUI(session);
   unlockAppFromLogin();
-  await bootstrapApp();
-  showToast(`Welcome ${session.name}`, 'success');
+  try {
+    saveDemoAuth(session);
+  } catch (e) {
+    console.warn('Unable to persist demo auth:', e);
+  }
+  try {
+    await bootstrapApp();
+  } catch (e) {
+    console.error('App bootstrap failed after login:', e);
+    showToast('Signed in, but failed to load inbox data', 'error');
+    return;
+  }
+  showToast(`Welcome ${session.name || session.email || 'Guest'}`, 'success');
 }
 
 async function initDemoLoginGate() {
@@ -164,28 +174,24 @@ async function initDemoLoginGate() {
   const togglePassBtn = $('login-toggle-password');
   const logoutBtn = $('logout-btn');
   const loginCard = gate.querySelector('.login-card');
-  const loader = $('login-loader');
-  const loaderText = $('login-loader-text');
   const controls = [emailInput, passInput, submitBtn, togglePassBtn, googleBtn, appleBtn]
     .filter(Boolean);
 
-  const setLoading = (enabled, text = 'Signing in...') => {
-    if (loginCard) loginCard.classList.toggle('is-loading', enabled);
-    if (loaderText) loaderText.textContent = text;
-    if (loader) loader.hidden = !enabled;
+  const setLoading = (enabled) => {
+    if (loginCard) loginCard.classList.remove('is-loading');
     controls.forEach(ctrl => {
       ctrl.disabled = enabled;
     });
   };
 
-  const loginWithTransition = async (session, text = 'Signing in...') => {
+  const loginWithTransition = async (session) => {
+    setLoading(true);
     try {
-      setLoading(true, text);
-      await new Promise(resolve => setTimeout(resolve, 900));
       await completeDemoLogin(session);
     } catch (e) {
       console.error('Login flow failed:', e);
       showToast('Unable to sign in right now', 'error');
+    } finally {
       setLoading(false);
     }
   };
@@ -230,7 +236,7 @@ async function initDemoLoginGate() {
         email,
         name: formatDisplayName(email),
         logged_at: new Date().toISOString(),
-      }, 'Signing in...');
+      });
     });
   }
 
@@ -245,7 +251,7 @@ async function initDemoLoginGate() {
         email,
         name: formatDisplayName(email),
         logged_at: new Date().toISOString(),
-      }, 'Connecting Google...');
+      });
     });
   }
 
@@ -260,7 +266,7 @@ async function initDemoLoginGate() {
         email,
         name: formatDisplayName(email),
         logged_at: new Date().toISOString(),
-      }, 'Connecting Apple...');
+      });
     });
   }
 
