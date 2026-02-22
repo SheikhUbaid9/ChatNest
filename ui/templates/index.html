@@ -51,11 +51,28 @@
     </div>
 
     <div class="header-right">
+      <div class="user-chip" id="user-chip" style="display:none">
+        <span class="user-chip-dot"></span>
+        <span id="user-label">Demo User</span>
+      </div>
       <button class="btn-icon" id="refresh-btn" title="Refresh all platforms">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10"/>
           <polyline points="1 20 1 14 7 14"/>
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+      <button
+        class="btn-icon"
+        id="logout-btn"
+        title="Sign out"
+        aria-label="Sign out"
+        style="display:none"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
         </svg>
       </button>
       <button
@@ -201,6 +218,51 @@
   </aside>
 
 </div><!-- /.app -->
+
+<div class="login-gate" id="login-gate" hidden>
+  <div class="login-bg-orb orb-a"></div>
+  <div class="login-bg-orb orb-b"></div>
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="login-brand-icon"></div>
+      <div>
+        <div class="login-brand-title">ChatNest</div>
+        <div class="login-brand-sub">Demo Access Portal</div>
+      </div>
+    </div>
+
+    <form id="demo-login-form" class="login-form" autocomplete="off">
+      <label class="login-field">
+        <span>Email</span>
+        <input id="login-email" type="email" placeholder="you@university.edu" required />
+      </label>
+      <label class="login-field">
+        <span>Password</span>
+        <div class="password-wrap">
+          <input id="login-password" type="password" placeholder="Enter password" required minlength="4" />
+          <button id="login-toggle-password" type="button" class="password-toggle" aria-label="Toggle password visibility">Show</button>
+        </div>
+      </label>
+
+      <button id="login-submit" type="submit" class="login-primary">Log In</button>
+    </form>
+
+    <div class="login-divider">
+      <span></span>
+      <p>or continue in demo mode</p>
+      <span></span>
+    </div>
+
+    <div class="login-actions">
+      <button id="login-google" type="button" class="login-alt">Continue with Google</button>
+      <button id="login-guest" type="button" class="login-alt">Continue as Guest</button>
+    </div>
+
+    <p class="login-note">
+      Presentation mode only. This login is UI-only for demo and does not store real passwords.
+    </p>
+  </div>
+</div>
 
 <div class="toollog-backdrop" id="toollog-backdrop"></div>
 

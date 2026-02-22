@@ -45,6 +45,8 @@ const PLATFORMS = {
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
 const MOBILE_BREAKPOINT = 920;
+const DEMO_AUTH_KEY = 'chatnest_demo_auth_v1';
+let appBootstrapped = false;
 
 function isMobileView() {
   return window.innerWidth <= MOBILE_BREAKPOINT;
@@ -70,16 +72,184 @@ function syncToolLogDrawerLayout() {
   }
 }
 
+async function bootstrapApp() {
+  if (appBootstrapped) return;
+  appBootstrapped = true;
+  connectWebSocket();
+  await loadStatus();
+  await loadMessages();
+  setInterval(loadStatus, 30_000);
+}
+
+function readDemoAuth() {
+  try {
+    const raw = localStorage.getItem(DEMO_AUTH_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveDemoAuth(payload) {
+  localStorage.setItem(DEMO_AUTH_KEY, JSON.stringify(payload));
+}
+
+function clearDemoAuth() {
+  localStorage.removeItem(DEMO_AUTH_KEY);
+}
+
+function formatDisplayName(email = '') {
+  const username = (email.split('@')[0] || 'guest').trim();
+  const clean = username
+    .replace(/[^a-zA-Z0-9._-]/g, ' ')
+    .split(/[._\-\s]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+  return clean || 'Guest';
+}
+
+function lockAppWithLogin() {
+  const gate = $('login-gate');
+  closeToolLogDrawer();
+  document.body.classList.add('login-locked');
+  if (gate) gate.hidden = false;
+}
+
+function unlockAppFromLogin() {
+  const gate = $('login-gate');
+  document.body.classList.remove('login-locked');
+  if (gate) gate.hidden = true;
+}
+
+function applyAuthUI(session) {
+  const chip = $('user-chip');
+  const label = $('user-label');
+  const logout = $('logout-btn');
+  if (!chip || !label || !logout) return;
+
+  if (session) {
+    label.textContent = session.name || session.email || 'Guest';
+    chip.style.display = 'inline-flex';
+    logout.style.display = 'inline-flex';
+  } else {
+    chip.style.display = 'none';
+    logout.style.display = 'none';
+  }
+}
+
+async function completeDemoLogin(session) {
+  saveDemoAuth(session);
+  applyAuthUI(session);
+  unlockAppFromLogin();
+  await bootstrapApp();
+  showToast(`Welcome ${session.name}`, 'success');
+}
+
+async function initDemoLoginGate() {
+  const gate = $('login-gate');
+  if (!gate) {
+    await bootstrapApp();
+    return;
+  }
+
+  const emailInput = $('login-email');
+  const passInput = $('login-password');
+  const form = $('demo-login-form');
+  const googleBtn = $('login-google');
+  const guestBtn = $('login-guest');
+  const togglePassBtn = $('login-toggle-password');
+  const logoutBtn = $('logout-btn');
+
+  const session = readDemoAuth();
+  applyAuthUI(session);
+
+  if (session) {
+    unlockAppFromLogin();
+    await bootstrapApp();
+  } else {
+    lockAppWithLogin();
+  }
+
+  if (togglePassBtn && passInput) {
+    togglePassBtn.addEventListener('click', () => {
+      const isHidden = passInput.type === 'password';
+      passInput.type = isHidden ? 'text' : 'password';
+      togglePassBtn.textContent = isHidden ? 'Hide' : 'Show';
+    });
+  }
+
+  if (form && emailInput && passInput) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const email = emailInput.value.trim().toLowerCase();
+      const password = passInput.value;
+
+      if (!email || !email.includes('@')) {
+        showToast('Enter a valid email address', 'error');
+        emailInput.focus();
+        return;
+      }
+      if (!password || password.length < 4) {
+        showToast('Password must be at least 4 characters', 'error');
+        passInput.focus();
+        return;
+      }
+
+      await completeDemoLogin({
+        provider: 'password-demo',
+        email,
+        name: formatDisplayName(email),
+        logged_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  if (googleBtn) {
+    googleBtn.addEventListener('click', async () => {
+      const seededEmail = (emailInput?.value || '').trim().toLowerCase();
+      const email = seededEmail && seededEmail.includes('@')
+        ? seededEmail
+        : 'demo.google@chatnest.app';
+      await completeDemoLogin({
+        provider: 'google-demo',
+        email,
+        name: formatDisplayName(email),
+        logged_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  if (guestBtn) {
+    guestBtn.addEventListener('click', async () => {
+      await completeDemoLogin({
+        provider: 'guest',
+        email: 'guest@chatnest.app',
+        name: 'Guest Demo',
+        logged_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      clearDemoAuth();
+      applyAuthUI(null);
+      lockAppWithLogin();
+      if (emailInput) emailInput.focus();
+      showToast('Signed out', 'success');
+    });
+  }
+}
+
 /* ══════════════════════════════════════════════════
    INIT
    ══════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
-  connectWebSocket();
-  await loadStatus();
-  await loadMessages();
-  // Poll unread counts every 30 s
-  setInterval(loadStatus, 30_000);
+  await initDemoLoginGate();
 });
 
 /* ══════════════════════════════════════════════════
