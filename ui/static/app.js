@@ -44,6 +44,31 @@ const PLATFORMS = {
 /* ── DOM refs ──────────────────────────────────────── */
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
+const MOBILE_BREAKPOINT = 920;
+
+function isMobileView() {
+  return window.innerWidth <= MOBILE_BREAKPOINT;
+}
+
+function openToolLogDrawer() {
+  if (!isMobileView()) return;
+  document.body.classList.add('toollog-open');
+}
+
+function closeToolLogDrawer() {
+  document.body.classList.remove('toollog-open');
+}
+
+function toggleToolLogDrawer() {
+  if (!isMobileView()) return;
+  document.body.classList.toggle('toollog-open');
+}
+
+function syncToolLogDrawerLayout() {
+  if (!isMobileView()) {
+    closeToolLogDrawer();
+  }
+}
 
 /* ══════════════════════════════════════════════════
    INIT
@@ -617,6 +642,7 @@ function setupEventListeners() {
       tab.classList.add('active');
       state.activeTab = platform;
       loadMessages(platform);
+      closeToolLogDrawer();
     });
   });
 
@@ -635,6 +661,7 @@ function setupEventListeners() {
 
       state.activeTab = platform;
       loadMessages(platform);
+      closeToolLogDrawer();
     });
   });
 
@@ -642,6 +669,7 @@ function setupEventListeners() {
   const refreshBtn = $('refresh-btn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async () => {
+      closeToolLogDrawer();
       refreshBtn.classList.add('spinning');
       try {
         await apiFetch(API.refresh, { method: 'POST' });
@@ -655,6 +683,24 @@ function setupEventListeners() {
       }
     });
   }
+
+  // Mobile tool-log drawer
+  const toolLogToggle = $('toollog-toggle');
+  const toolLogBackdrop = $('toollog-backdrop');
+
+  if (toolLogToggle) {
+    toolLogToggle.addEventListener('click', toggleToolLogDrawer);
+  }
+
+  if (toolLogBackdrop) {
+    toolLogBackdrop.addEventListener('click', closeToolLogDrawer);
+  }
+
+  window.addEventListener('resize', syncToolLogDrawerLayout);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeToolLogDrawer();
+  });
+  syncToolLogDrawerLayout();
 }
 
 /* ══════════════════════════════════════════════════

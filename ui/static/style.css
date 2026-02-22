@@ -184,8 +184,13 @@ body {
 
 .btn-icon:hover { background: var(--surface-3); color: var(--text); border-color: var(--border-light); }
 .btn-icon.spinning svg { animation: spin 1s linear infinite; }
+.btn-icon.mobile-only { display: none; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.toollog-backdrop {
+  display: none;
+}
 
 /* ── Sidebar ───────────────────────────────────────── */
 .sidebar {
@@ -1051,17 +1056,19 @@ body {
 @media (max-width: 920px) {
   body {
     font-size: 13px;
+    height: 100dvh;
+    overflow: hidden;
   }
 
   .app {
     min-height: 100dvh;
     height: 100dvh;
     grid-template-rows: auto auto minmax(0, 1fr);
-    grid-template-columns: minmax(0, 1fr) 132px;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      "header header"
-      "sidebar sidebar"
-      "messages toollog";
+      "header"
+      "sidebar"
+      "messages";
   }
 
   .header {
@@ -1095,6 +1102,7 @@ body {
 
   .header-right {
     margin-left: auto;
+    gap: 6px;
   }
 
   .status-pill {
@@ -1107,9 +1115,13 @@ body {
     display: none;
   }
 
+  .btn-icon.mobile-only {
+    display: inline-flex;
+  }
+
   .messages-panel {
     min-height: 0;
-    border-right: 1px solid var(--border);
+    border-right: none;
   }
 
   .tab-bar {
@@ -1153,6 +1165,7 @@ body {
   .sidebar {
     grid-area: sidebar;
     display: flex;
+    flex-direction: row;
     flex-wrap: nowrap;
     gap: 8px;
     overflow-x: auto;
@@ -1174,7 +1187,7 @@ body {
   }
 
   .platform-btn {
-    min-width: 185px;
+    min-width: 168px;
     flex: 0 0 auto;
     padding: 9px;
   }
@@ -1186,18 +1199,46 @@ body {
   }
 
   .tool-log {
-    grid-area: toollog;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(84vw, 320px);
     min-height: 0;
+    z-index: 1601;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
     border-top: none;
     border-left: 1px solid var(--border);
+    box-shadow: -12px 0 24px rgba(0, 0, 0, 0.45);
+  }
+
+  .toollog-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 1600;
+  }
+
+  body.toollog-open .tool-log {
+    transform: translateX(0);
+  }
+
+  body.toollog-open .toollog-backdrop {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .tool-log .panel-header {
-    padding: 10px 8px;
+    padding: 10px;
   }
 
   .panel-title {
-    font-size: 11px;
+    font-size: 12px;
     gap: 5px;
   }
 
@@ -1206,8 +1247,8 @@ body {
   }
 
   .tool-log-list {
-    padding: 6px;
-    max-height: none;
+    padding: 8px;
+    max-height: 100%;
   }
 
   .log-entry {
@@ -1265,10 +1306,6 @@ body {
 }
 
 @media (max-width: 420px) {
-  .app {
-    grid-template-columns: minmax(0, 1fr) 116px;
-  }
-
   .logo-text {
     display: none;
   }
@@ -1283,7 +1320,7 @@ body {
   }
 
   .platform-btn {
-    min-width: 160px;
+    min-width: 144px;
   }
 
   .platform-sub {
@@ -1292,5 +1329,9 @@ body {
 
   .tab {
     padding: 7px 9px;
+  }
+
+  .tool-log {
+    width: min(90vw, 280px);
   }
 }
