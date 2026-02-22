@@ -227,40 +227,71 @@
       <div class="login-brand-icon"></div>
       <div>
         <div class="login-brand-title">ChatNest</div>
-        <div class="login-brand-sub">Demo Access Portal</div>
+        <div class="login-brand-sub">Unified Message Hub</div>
       </div>
     </div>
+    <p class="login-tagline">Sign in to continue</p>
 
-    <form id="demo-login-form" class="login-form" autocomplete="off">
+    <form class="login-form" id="demo-login-form">
       <label class="login-field">
         <span>Email</span>
-        <input id="login-email" type="email" placeholder="you@university.edu" required />
+        <input
+          id="login-email"
+          type="email"
+          inputmode="email"
+          autocomplete="email"
+          placeholder="you@example.com"
+          required
+        />
       </label>
+
       <label class="login-field">
         <span>Password</span>
         <div class="password-wrap">
-          <input id="login-password" type="password" placeholder="Enter password" required minlength="4" />
-          <button id="login-toggle-password" type="button" class="password-toggle" aria-label="Toggle password visibility">Show</button>
+          <input
+            id="login-password"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Enter your password"
+            required
+          />
+          <button id="login-toggle-password" type="button" class="password-toggle">Show</button>
         </div>
       </label>
 
       <button id="login-submit" type="submit" class="login-primary">Log In</button>
     </form>
 
-    <div class="login-divider">
+    <div class="login-divider" aria-hidden="true">
       <span></span>
-      <p>or continue in demo mode</p>
+      <p>or</p>
       <span></span>
     </div>
 
-    <div class="login-actions">
-      <button id="login-google" type="button" class="login-alt">Continue with Google</button>
-      <button id="login-guest" type="button" class="login-alt">Continue as Guest</button>
+    <div class="login-actions social">
+      <button id="login-google" type="button" class="login-alt social google">
+        <span class="social-icon google" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16">
+            <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.5 3.7-5.5 3.7-3.3 0-6.1-2.8-6.1-6.1s2.7-6.1 6.1-6.1c1.9 0 3.1.8 3.8 1.4l2.6-2.5C16.9 3.1 14.7 2.2 12 2.2 6.8 2.2 2.6 6.4 2.6 11.6S6.8 21 12 21c6.9 0 9.1-4.8 9.1-7.2 0-.5-.1-.9-.1-1.3H12z"/>
+          </svg>
+        </span>
+        <span>Log In with Google</span>
+      </button>
+
+      <button id="login-apple" type="button" class="login-alt social apple">
+        <span class="social-icon apple" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16">
+            <path fill="currentColor" d="M16.3 12.7c0-2.3 1.9-3.4 2-3.4-1.1-1.6-2.8-1.8-3.4-1.8-1.5-.2-2.8.9-3.6.9-.8 0-2-.9-3.3-.8-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.3.9 1.2 1.9 2.6 3.3 2.6 1.3-.1 1.8-.8 3.4-.8s2.1.8 3.4.8c1.4 0 2.3-1.3 3.2-2.5 1-1.5 1.4-3 1.4-3.1-.1 0-2.7-1-2.7-4zm-2.4-6.7c.7-.9 1.1-2.1 1-3.3-1 .1-2.2.7-2.9 1.6-.7.8-1.2 2-1.1 3.2 1.1.1 2.3-.6 3-1.5z"/>
+          </svg>
+        </span>
+        <span>Log In with Apple</span>
+      </button>
     </div>
 
-    <p class="login-note">
-      Presentation mode only. This login is UI-only for demo and does not store real passwords.
-    </p>
+    <div class="login-loader" id="login-loader" hidden>
+      <div class="loader-ring" aria-hidden="true"></div>
+      <span id="login-loader-text">Signing in...</span>
+    </div>
   </div>
 </div>
 

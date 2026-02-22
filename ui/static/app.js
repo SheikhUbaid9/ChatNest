@@ -159,9 +159,36 @@ async function initDemoLoginGate() {
   const passInput = $('login-password');
   const form = $('demo-login-form');
   const googleBtn = $('login-google');
-  const guestBtn = $('login-guest');
+  const appleBtn = $('login-apple');
+  const submitBtn = $('login-submit');
   const togglePassBtn = $('login-toggle-password');
   const logoutBtn = $('logout-btn');
+  const loginCard = gate.querySelector('.login-card');
+  const loader = $('login-loader');
+  const loaderText = $('login-loader-text');
+  const controls = [emailInput, passInput, submitBtn, togglePassBtn, googleBtn, appleBtn]
+    .filter(Boolean);
+
+  const setLoading = (enabled, text = 'Signing in...') => {
+    if (loginCard) loginCard.classList.toggle('is-loading', enabled);
+    if (loaderText) loaderText.textContent = text;
+    if (loader) loader.hidden = !enabled;
+    controls.forEach(ctrl => {
+      ctrl.disabled = enabled;
+    });
+  };
+
+  const loginWithTransition = async (session, text = 'Signing in...') => {
+    try {
+      setLoading(true, text);
+      await new Promise(resolve => setTimeout(resolve, 900));
+      await completeDemoLogin(session);
+    } catch (e) {
+      console.error('Login flow failed:', e);
+      showToast('Unable to sign in right now', 'error');
+      setLoading(false);
+    }
+  };
 
   const session = readDemoAuth();
   applyAuthUI(session);
@@ -198,12 +225,12 @@ async function initDemoLoginGate() {
         return;
       }
 
-      await completeDemoLogin({
-        provider: 'password-demo',
+      await loginWithTransition({
+        provider: 'email',
         email,
         name: formatDisplayName(email),
         logged_at: new Date().toISOString(),
-      });
+      }, 'Signing in...');
     });
   }
 
@@ -212,24 +239,28 @@ async function initDemoLoginGate() {
       const seededEmail = (emailInput?.value || '').trim().toLowerCase();
       const email = seededEmail && seededEmail.includes('@')
         ? seededEmail
-        : 'demo.google@chatnest.app';
-      await completeDemoLogin({
-        provider: 'google-demo',
+        : 'google.user@chatnest.app';
+      await loginWithTransition({
+        provider: 'google',
         email,
         name: formatDisplayName(email),
         logged_at: new Date().toISOString(),
-      });
+      }, 'Connecting Google...');
     });
   }
 
-  if (guestBtn) {
-    guestBtn.addEventListener('click', async () => {
-      await completeDemoLogin({
-        provider: 'guest',
-        email: 'guest@chatnest.app',
-        name: 'Guest Demo',
+  if (appleBtn) {
+    appleBtn.addEventListener('click', async () => {
+      const seededEmail = (emailInput?.value || '').trim().toLowerCase();
+      const email = seededEmail && seededEmail.includes('@')
+        ? seededEmail
+        : 'apple.user@chatnest.app';
+      await loginWithTransition({
+        provider: 'apple',
+        email,
+        name: formatDisplayName(email),
         logged_at: new Date().toISOString(),
-      });
+      }, 'Connecting Apple...');
     });
   }
 
@@ -237,6 +268,7 @@ async function initDemoLoginGate() {
     logoutBtn.addEventListener('click', () => {
       clearDemoAuth();
       applyAuthUI(null);
+      setLoading(false);
       lockAppWithLogin();
       if (emailInput) emailInput.focus();
       showToast('Signed out', 'success');

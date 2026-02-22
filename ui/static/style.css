@@ -327,6 +327,12 @@ body.login-locked .app {
   text-transform: uppercase;
 }
 
+.login-tagline {
+  margin: 2px 0 16px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
 .login-form {
   display: flex;
   flex-direction: column;
@@ -449,11 +455,62 @@ body.login-locked .app {
   background: rgba(30, 41, 59, 0.9);
 }
 
+.login-alt.social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+}
+
+.social-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.social-icon.apple {
+  color: var(--text);
+}
+
 .login-note {
   margin-top: 13px;
   font-size: 11px;
   line-height: 1.55;
   color: var(--muted);
+}
+
+.login-loader {
+  margin-top: 14px;
+  border: 1px solid rgba(96,165,250,0.35);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  color: var(--text-2);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.loader-ring {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(148,163,184,0.35);
+  border-top-color: #60a5fa;
+  animation: spin 0.8s linear infinite;
+}
+
+.login-card.is-loading .login-form,
+.login-card.is-loading .login-actions,
+.login-card.is-loading .login-divider,
+.login-card.is-loading .login-tagline {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 /* ── Sidebar ───────────────────────────────────────── */
