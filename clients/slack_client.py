@@ -13,12 +13,15 @@ Required bot scopes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from functools import lru_cache
 from typing import Any
 
+from auth_security import decrypt_secret
 from config import get_settings
+from database import get_provider_token_sync
 
 logger = logging.getLogger(__name__)
 
@@ -336,3 +339,76 @@ def get_slack_data(limit: int = 20) -> tuple[list[dict[str, Any]], bool]:
     except Exception as exc:
         logger.warning("Slack API error (%s) — falling back to mock data", exc)
         return MOCK_MESSAGES, True
+
+
+def get_user_slack_token(user_id: str) -> str:
+    row = get_provider_token_sync(user_id, "slack")
+    if not row or not row.get("access_token"):
+        return ""
+    try:
+        return decrypt_secret(row["access_token"])
+    except Exception:
+        return ""
+
+
+def is_slack_connected_for_user(user_id: str) -> bool:
+    return bool(get_user_slack_token(user_id))
+
+
+@lru_cache(maxsize=256)
+def get_user_slack_client(user_id: str) -> SlackClient:
+    token = get_user_slack_token(user_id)
+    if not token:
+        raise RuntimeError("Slack is not connected for this user")
+    return SlackClient(token=token)
+
+
+def get_slack_data_for_user(
+    user_id: str,
+    *,
+    channel: str | None = None,
+    limit: int = 20,
+) -> tuple[list[dict[str, Any]], bool]:
+    token = get_user_slack_token(user_id)
+    if not token:
+        if channel:
+            clean = channel.lstrip("#")
+            messages = [
+                m for m in MOCK_MESSAGES
+                if m.get("channel", "").lstrip("#") == clean
+            ] or MOCK_MESSAGES
+            return messages, True
+        return MOCK_MESSAGES, True
+
+    try:
+        client = get_user_slack_client(user_id)
+        if channel:
+            messages = client.get_messages(channel=channel, limit=limit)
+        else:
+            messages = client.get_all_channel_messages(limit_per_channel=max(1, min(limit, 20)))
+        logger.info("Slack(user=%s): fetched %d real messages", user_id, len(messages))
+        return messages, False
+    except Exception as exc:
+        logger.warning("Slack(user=%s) API error (%s) — fallback mock", user_id, exc)
+        return MOCK_MESSAGES, True
+
+
+async def send_slack_message_for_user(
+    user_id: str,
+    *,
+    channel: str,
+    text: str,
+    thread_ts: str | None = None,
+) -> bool:
+    client = get_user_slack_client(user_id)
+    return await asyncio.to_thread(client.send_message, channel, text, thread_ts)
+
+
+async def get_slack_thread_for_user(
+    user_id: str,
+    *,
+    channel: str,
+    thread_ts: str,
+) -> list[dict[str, Any]]:
+    client = get_user_slack_client(user_id)
+    return await asyncio.to_thread(client.get_thread_messages, channel, thread_ts)

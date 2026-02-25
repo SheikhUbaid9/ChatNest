@@ -17,6 +17,10 @@ from typing import Any
 from clients.gmail_client import (
     get_gmail_client,
     get_gmail_data,
+    get_gmail_data_for_user,
+    get_gmail_thread_for_user,
+    mark_gmail_read_for_user,
+    send_gmail_reply_for_user,
 )
 from config import get_settings
 from database import (
@@ -31,9 +35,9 @@ logger = logging.getLogger(__name__)
 
 # ── Shared tool-log helper ────────────────────────────────────────────────────
 
-async def _timed_tool(name: str, platform: str = "gmail"):
+async def _timed_tool(name: str, platform: str = "gmail", user_id: str = "global"):
     """Context manager that logs start/finish to the tool_log table."""
-    log_id = await log_tool_call(name, platform)
+    log_id = await log_tool_call(name, platform, user_id=user_id)
     start = time.monotonic()
 
     class _Ctx:
@@ -53,7 +57,7 @@ async def _timed_tool(name: str, platform: str = "gmail"):
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
-async def get_gmail_unread(max_results: int = 50) -> dict[str, Any]:
+async def get_gmail_unread(max_results: int = 50, user_id: str = "global") -> dict[str, Any]:
     """
     Fetch unread Gmail messages (real or mock).
 
@@ -63,14 +67,17 @@ async def get_gmail_unread(max_results: int = 50) -> dict[str, Any]:
       is_mock    : True when using demo data
       demo_mode  : True when credentials not configured
     """
-    ctx = await _timed_tool("get_gmail_unread")
+    ctx = await _timed_tool("get_gmail_unread", user_id=user_id)
 
     try:
-        emails, is_mock = get_gmail_data(max_results)
+        if user_id != "global":
+            emails, is_mock = await get_gmail_data_for_user(user_id=user_id, max_results=max_results)
+        else:
+            emails, is_mock = get_gmail_data(max_results)
 
         # Cache in SQLite
         if emails:
-            await upsert_messages(emails)
+            await upsert_messages(emails, user_id=user_id)
 
         summary = f"{len(emails)} emails {'(mock)' if is_mock else '(live)'}"
         await ctx.done(summary)
@@ -95,6 +102,7 @@ async def send_gmail_reply(
     to: str,
     subject: str,
     body: str,
+    user_id: str = "global",
 ) -> dict[str, Any]:
     """
     Reply to an existing Gmail thread.
@@ -108,11 +116,11 @@ async def send_gmail_reply(
 
     Returns success status and a confirmation message.
     """
-    ctx = await _timed_tool("send_gmail_reply")
+    ctx = await _timed_tool("send_gmail_reply", user_id=user_id)
     settings = get_settings()
 
     try:
-        if not settings.gmail_enabled:
+        if user_id == "global" and not settings.gmail_enabled:
             # Demo mode — simulate success
             await ctx.done(f"[Demo] Reply to {to} simulated")
             return {
@@ -124,15 +132,23 @@ async def send_gmail_reply(
                 "subject": subject,
             }
 
-        client = get_gmail_client()
-        # Strip platform prefix from id if present
         native_thread = thread_id.replace("gmail:", "").split(":")[0]
-        success = client.send_reply(
-            thread_id=native_thread,
-            to=to,
-            subject=subject,
-            body=body,
-        )
+        if user_id != "global":
+            success = await send_gmail_reply_for_user(
+                user_id=user_id,
+                thread_id=native_thread,
+                to=to,
+                subject=subject,
+                body=body,
+            )
+        else:
+            client = get_gmail_client()
+            success = client.send_reply(
+                thread_id=native_thread,
+                to=to,
+                subject=subject,
+                body=body,
+            )
 
         await ctx.done(f"Reply sent to {to}")
         return {
@@ -150,12 +166,12 @@ async def send_gmail_reply(
         return {
             "tool": "send_gmail_reply",
             "success": False,
-            "demo_mode": not settings.gmail_enabled,
+            "demo_mode": (user_id == "global" and not settings.gmail_enabled),
             "message": f"Failed to send reply: {exc}",
         }
 
 
-async def mark_gmail_read(message_id: str) -> dict[str, Any]:
+async def mark_gmail_read(message_id: str, user_id: str = "global") -> dict[str, Any]:
     """
     Mark a Gmail message as read — both in the local cache and via the API.
 
@@ -164,15 +180,17 @@ async def mark_gmail_read(message_id: str) -> dict[str, Any]:
 
     Returns success status.
     """
-    ctx = await _timed_tool("mark_gmail_read")
+    ctx = await _timed_tool("mark_gmail_read", user_id=user_id)
     settings = get_settings()
 
     try:
         # Always update local cache
-        await mark_read(message_id)
+        await mark_read(message_id, user_id=user_id)
 
         api_success = False
-        if settings.gmail_enabled:
+        if user_id != "global":
+            api_success = await mark_gmail_read_for_user(user_id=user_id, message_id=message_id)
+        elif settings.gmail_enabled:
             client = get_gmail_client()
             api_success = client.mark_as_read(message_id)
         else:
@@ -184,7 +202,7 @@ async def mark_gmail_read(message_id: str) -> dict[str, Any]:
         return {
             "tool": "mark_gmail_read",
             "success": api_success,
-            "demo_mode": not settings.gmail_enabled,
+            "demo_mode": (user_id == "global" and not settings.gmail_enabled),
             "message_id": message_id,
             "message": f"Message {message_id} marked as read.",
         }
@@ -200,7 +218,7 @@ async def mark_gmail_read(message_id: str) -> dict[str, Any]:
         }
 
 
-async def summarize_gmail_thread(thread_id: str) -> dict[str, Any]:
+async def summarize_gmail_thread(thread_id: str, user_id: str = "global") -> dict[str, Any]:
     """
     Fetch all messages in a Gmail thread and return them formatted
     so Claude can produce a natural-language summary.
@@ -210,11 +228,11 @@ async def summarize_gmail_thread(thread_id: str) -> dict[str, Any]:
 
     Returns a structured thread object with all messages.
     """
-    ctx = await _timed_tool("summarize_gmail_thread")
+    ctx = await _timed_tool("summarize_gmail_thread", user_id=user_id)
     settings = get_settings()
 
     try:
-        if not settings.gmail_enabled:
+        if user_id == "global" and not settings.gmail_enabled:
             # Demo: return the matching mock message as a single-message thread
             from clients.gmail_client import MOCK_EMAILS
             mock_msgs = [m for m in MOCK_EMAILS if m.get("thread_id") == thread_id]
@@ -237,9 +255,12 @@ async def summarize_gmail_thread(thread_id: str) -> dict[str, Any]:
                 ),
             }
 
-        client = get_gmail_client()
         native_thread = thread_id.replace("gmail:", "").split(":")[0]
-        messages = client.get_thread(native_thread)
+        if user_id != "global":
+            messages = await get_gmail_thread_for_user(user_id=user_id, thread_id=native_thread)
+        else:
+            client = get_gmail_client()
+            messages = client.get_thread(native_thread)
 
         thread_text = _format_thread_for_summary(messages)
         await ctx.done(f"Thread fetched ({len(messages)} messages)")

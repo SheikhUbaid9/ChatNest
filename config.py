@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     # ── Slack ────────────────────────────────────────────────────────────
     slack_bot_token: str = ""
     slack_default_channel: str = "general"
+    slack_oauth_client_id: str = ""
+    slack_oauth_client_secret: str = ""
+    slack_oauth_redirect_uri: str = ""
+    slack_oauth_scopes: str = (
+        "channels:history,channels:read,chat:write,"
+        "groups:history,groups:read,im:history,im:read,users:read"
+    )
 
     # ── Telegram Bot ─────────────────────────────────────────────────────
     telegram_bot_token: str = ""
@@ -57,6 +64,17 @@ class Settings(BaseSettings):
     mcp_port: int = 8001
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     force_mock: bool = False
+    app_base_url: str = "http://localhost:8000"
+
+    # ── Auth / Sessions ──────────────────────────────────────────────────
+    auth_session_cookie_name: str = "chatnest_session"
+    auth_session_ttl_hours: int = 168
+    auth_encryption_key: str = ""
+
+    # ── Google OAuth (web flow, per-user) ───────────────────────────────
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = ""
 
     # ── Derived flags (set by model_validator) ───────────────────────────
     gmail_enabled: bool = False
@@ -67,6 +85,11 @@ class Settings(BaseSettings):
     @classmethod
     def expand_path(cls, v: str | Path) -> Path:
         return Path(v).expanduser().resolve()
+
+    @field_validator("auth_session_ttl_hours")
+    @classmethod
+    def validate_session_ttl(cls, v: int) -> int:
+        return max(1, int(v))
 
     @model_validator(mode="after")
     def detect_enabled_platforms(self) -> "Settings":

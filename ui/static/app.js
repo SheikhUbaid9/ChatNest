@@ -10,6 +10,13 @@ const API = {
   gmail:        '/api/messages/gmail',
   slack:        '/api/messages/slack',
   telegram:     '/api/messages/telegram',
+  authMe:       '/api/auth/me',
+  authLogin:    '/api/auth/login',
+  authRegister: '/api/auth/register',
+  authLogout:   '/api/auth/logout',
+  providers:    '/api/providers/status',
+  gmailDisconnect: '/api/providers/gmail/disconnect',
+  slackDisconnect: '/api/providers/slack/disconnect',
   unread:       '/api/unread-counts',
   markRead:     '/api/mark-read',
   refresh:      '/api/refresh',
@@ -32,6 +39,8 @@ const state = {
   wsConnected:    false,
   loading:        false,
   replyTarget:    null,
+  user:           null,
+  providers:      {},
 };
 
 /* ── Platform metadata ─────────────────────────────── */
@@ -45,7 +54,6 @@ const PLATFORMS = {
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
 const MOBILE_BREAKPOINT = 920;
-const DEMO_AUTH_KEY = 'chatnest_demo_auth_v1';
 let appBootstrapped = false;
 
 function isMobileView() {
@@ -76,27 +84,13 @@ async function bootstrapApp() {
   if (appBootstrapped) return;
   appBootstrapped = true;
   connectWebSocket();
+  await loadProviderStatus();
   await loadStatus();
   await loadMessages();
-  setInterval(loadStatus, 30_000);
-}
-
-function readDemoAuth() {
-  try {
-    const raw = localStorage.getItem(DEMO_AUTH_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch (e) {
-    return null;
-  }
-}
-
-function saveDemoAuth(payload) {
-  localStorage.setItem(DEMO_AUTH_KEY, JSON.stringify(payload));
-}
-
-function clearDemoAuth() {
-  localStorage.removeItem(DEMO_AUTH_KEY);
+  setInterval(async () => {
+    await loadProviderStatus();
+    await loadStatus();
+  }, 30_000);
 }
 
 function formatDisplayName(email = '') {
@@ -113,6 +107,12 @@ function formatDisplayName(email = '') {
 
 function lockAppWithLogin() {
   const gate = $('login-gate');
+  if (ws) {
+    try { ws.close(); } catch (e) {}
+    ws = null;
+    state.wsConnected = false;
+    updateWsIndicator(false);
+  }
   closeToolLogDrawer();
   document.body.classList.add('login-locked');
   if (gate) gate.hidden = false;
@@ -125,13 +125,14 @@ function unlockAppFromLogin() {
 }
 
 function applyAuthUI(session) {
+  state.user = session || null;
   const chip = $('user-chip');
   const label = $('user-label');
   const logout = $('logout-btn');
   if (!chip || !label || !logout) return;
 
   if (session) {
-    label.textContent = session.name || session.email || 'Guest';
+    label.textContent = session.display_name || session.name || session.email || 'Guest';
     chip.style.display = 'inline-flex';
     logout.style.display = 'inline-flex';
   } else {
@@ -140,14 +141,9 @@ function applyAuthUI(session) {
   }
 }
 
-async function completeDemoLogin(session) {
+async function completeLogin(session) {
   applyAuthUI(session);
   unlockAppFromLogin();
-  try {
-    saveDemoAuth(session);
-  } catch (e) {
-    console.warn('Unable to persist demo auth:', e);
-  }
   try {
     await bootstrapApp();
   } catch (e) {
@@ -155,7 +151,7 @@ async function completeDemoLogin(session) {
     showToast('Signed in, but failed to load inbox data', 'error');
     return;
   }
-  showToast(`Welcome ${session.name || session.email || 'Guest'}`, 'success');
+  showToast(`Welcome ${session.display_name || session.email || 'Guest'}`, 'success');
 }
 
 async function initDemoLoginGate() {
@@ -187,7 +183,7 @@ async function initDemoLoginGate() {
   const loginWithTransition = async (session) => {
     setLoading(true);
     try {
-      await completeDemoLogin(session);
+      await completeLogin(session);
     } catch (e) {
       console.error('Login flow failed:', e);
       showToast('Unable to sign in right now', 'error');
@@ -196,13 +192,18 @@ async function initDemoLoginGate() {
     }
   };
 
-  const session = readDemoAuth();
-  applyAuthUI(session);
-
-  if (session) {
-    unlockAppFromLogin();
-    await bootstrapApp();
-  } else {
+  try {
+    const auth = await apiFetch(API.authMe);
+    if (auth?.authenticated && auth.user) {
+      applyAuthUI(auth.user);
+      unlockAppFromLogin();
+      await bootstrapApp();
+    } else {
+      applyAuthUI(null);
+      lockAppWithLogin();
+    }
+  } catch (e) {
+    applyAuthUI(null);
     lockAppWithLogin();
   }
 
@@ -225,55 +226,69 @@ async function initDemoLoginGate() {
         emailInput.focus();
         return;
       }
-      if (!password || password.length < 4) {
-        showToast('Password must be at least 4 characters', 'error');
+      if (!password || password.length < 8) {
+        showToast('Password must be at least 8 characters', 'error');
         passInput.focus();
         return;
       }
 
-      await loginWithTransition({
-        provider: 'email',
-        email,
-        name: formatDisplayName(email),
-        logged_at: new Date().toISOString(),
-      });
+      setLoading(true);
+      try {
+        let result = null;
+        try {
+          result = await apiFetch(API.authLogin, {
+            method: 'POST',
+            body: JSON.stringify({ email, password }),
+          });
+        } catch (loginErr) {
+          if (loginErr.status === 404) {
+            await apiFetch(API.authRegister, {
+              method: 'POST',
+              body: JSON.stringify({
+                email,
+                password,
+                display_name: formatDisplayName(email),
+              }),
+            });
+            result = await apiFetch(API.authLogin, {
+              method: 'POST',
+              body: JSON.stringify({ email, password }),
+            });
+          } else {
+            throw loginErr;
+          }
+        }
+        if (result?.user) {
+          await loginWithTransition(result.user);
+        } else {
+          showToast('Login failed', 'error');
+        }
+      } catch (e) {
+        showToast(e?.message || 'Unable to sign in', 'error');
+      } finally {
+        setLoading(false);
+      }
     });
   }
 
   if (googleBtn) {
-    googleBtn.addEventListener('click', async () => {
-      const seededEmail = (emailInput?.value || '').trim().toLowerCase();
-      const email = seededEmail && seededEmail.includes('@')
-        ? seededEmail
-        : 'google.user@chatnest.app';
-      await loginWithTransition({
-        provider: 'google',
-        email,
-        name: formatDisplayName(email),
-        logged_at: new Date().toISOString(),
-      });
+    googleBtn.addEventListener('click', () => {
+      showToast('Use email/password to sign in, then connect Gmail from the Gmail status pill.', 'success');
     });
   }
 
   if (appleBtn) {
-    appleBtn.addEventListener('click', async () => {
-      const seededEmail = (emailInput?.value || '').trim().toLowerCase();
-      const email = seededEmail && seededEmail.includes('@')
-        ? seededEmail
-        : 'apple.user@chatnest.app';
-      await loginWithTransition({
-        provider: 'apple',
-        email,
-        name: formatDisplayName(email),
-        logged_at: new Date().toISOString(),
-      });
+    appleBtn.addEventListener('click', () => {
+      showToast('Apple login is not implemented in this branch yet.', 'error');
     });
   }
 
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
-      clearDemoAuth();
+    logoutBtn.addEventListener('click', async () => {
+      try { await apiFetch(API.authLogout, { method: 'POST' }); } catch (e) {}
       applyAuthUI(null);
+      state.providers = {};
+      appBootstrapped = false;
       setLoading(false);
       lockAppWithLogin();
       if (emailInput) emailInput.focus();
@@ -288,23 +303,64 @@ async function initDemoLoginGate() {
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
   await initDemoLoginGate();
+  const gmailFlag = consumeQueryFlag('gmail');
+  const slackFlag = consumeQueryFlag('slack');
+  if (gmailFlag === 'connected') {
+    await loadProviderStatus();
+    await loadStatus();
+    await loadMessages();
+    showToast('Gmail connected', 'success');
+  } else if (slackFlag === 'connected') {
+    await loadProviderStatus();
+    await loadStatus();
+    await loadMessages();
+    showToast('Slack connected', 'success');
+  }
 });
 
 /* ══════════════════════════════════════════════════
    API HELPERS
    ══════════════════════════════════════════════════ */
 async function apiFetch(url, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    headers,
     ...options,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  const ct = res.headers.get('content-type') || '';
+  let payload = null;
+  if (ct.includes('application/json')) {
+    try { payload = await res.json(); } catch (e) { payload = null; }
+  }
+  if (!res.ok) {
+    const err = new Error(payload?.detail || payload?.message || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.payload = payload;
+    throw err;
+  }
+  return payload;
 }
 
 /* ══════════════════════════════════════════════════
    STATUS / UNREAD COUNTS
    ══════════════════════════════════════════════════ */
+async function loadProviderStatus() {
+  try {
+    const data = await apiFetch(API.providers);
+    state.providers = data || {};
+    renderProviderActions();
+  } catch (e) {
+    if (e?.status === 401) {
+      applyAuthUI(null);
+      appBootstrapped = false;
+      lockAppWithLogin();
+      return;
+    }
+    console.warn('Provider status fetch failed:', e);
+  }
+}
+
 async function loadStatus() {
   try {
     const data = await apiFetch(API.status);
@@ -314,9 +370,18 @@ async function loadStatus() {
       slack:    data.platforms.slack.unread,
       telegram: data.platforms.telegram.unread,
     };
+    if (data.user) {
+      applyAuthUI(data.user);
+    }
     renderStatus(data);
     renderSidebarCounts();
   } catch (e) {
+    if (e?.status === 401) {
+      applyAuthUI(null);
+      appBootstrapped = false;
+      lockAppWithLogin();
+      return;
+    }
     console.warn('Status fetch failed:', e);
   }
 }
@@ -336,6 +401,32 @@ function renderStatus(data) {
     }
     const label = pill.querySelector('.status-label');
     if (label) label.textContent = info.connected ? 'Live' : 'Demo';
+  }
+
+  renderProviderActions();
+}
+
+function renderProviderActions() {
+  const gmailPill = $('status-gmail');
+  if (gmailPill) {
+    const gmail = state.providers.gmail || {};
+    const connected = !!gmail.connected;
+    gmailPill.dataset.connected = connected ? '1' : '0';
+    gmailPill.style.cursor = 'pointer';
+    gmailPill.title = connected
+      ? `Gmail connected${gmail.account_email ? ` as ${gmail.account_email}` : ''}. Click to disconnect.`
+      : 'Click to connect Gmail';
+  }
+
+  const slackPill = $('status-slack');
+  if (slackPill) {
+    const slack = state.providers.slack || {};
+    const connected = !!slack.connected;
+    slackPill.dataset.connected = connected ? '1' : '0';
+    slackPill.style.cursor = 'pointer';
+    slackPill.title = connected
+      ? `Slack connected${slack.workspace ? ` to ${slack.workspace}` : ''}. Click to disconnect.`
+      : 'Click to connect Slack';
   }
 }
 
@@ -374,6 +465,12 @@ async function loadMessages(platform = state.activeTab) {
     state.messages = data.messages || [];
     renderMessages();
   } catch (e) {
+    if (e?.status === 401) {
+      applyAuthUI(null);
+      appBootstrapped = false;
+      lockAppWithLogin();
+      return;
+    }
     console.error('Messages fetch failed:', e);
     showError('Failed to load messages');
   } finally {
@@ -825,6 +922,54 @@ function updateLogCount(n) {
   if (el) el.textContent = n + ' calls';
 }
 
+async function toggleGmailConnection() {
+  if (!state.user) {
+    lockAppWithLogin();
+    return;
+  }
+
+  const gmail = state.providers.gmail || {};
+  if (gmail.connected) {
+    try {
+      await apiFetch(API.gmailDisconnect, { method: 'POST' });
+      await loadProviderStatus();
+      await loadStatus();
+      await loadMessages();
+      showToast('Gmail disconnected', 'success');
+    } catch (e) {
+      showToast(e?.message || 'Failed to disconnect Gmail', 'error');
+    }
+    return;
+  }
+
+  const connectUrl = gmail.connect_url || '/auth/google/start?redirect=/';
+  window.location.href = connectUrl;
+}
+
+async function toggleSlackConnection() {
+  if (!state.user) {
+    lockAppWithLogin();
+    return;
+  }
+
+  const slack = state.providers.slack || {};
+  if (slack.connected) {
+    try {
+      await apiFetch(API.slackDisconnect, { method: 'POST' });
+      await loadProviderStatus();
+      await loadStatus();
+      await loadMessages();
+      showToast('Slack disconnected', 'success');
+    } catch (e) {
+      showToast(e?.message || 'Failed to disconnect Slack', 'error');
+    }
+    return;
+  }
+
+  const connectUrl = slack.connect_url || '/auth/slack/start?redirect=/';
+  window.location.href = connectUrl;
+}
+
 /* ══════════════════════════════════════════════════
    EVENT LISTENERS
    ══════════════════════════════════════════════════ */
@@ -884,6 +1029,7 @@ function setupEventListeners() {
       refreshBtn.classList.add('spinning');
       try {
         await apiFetch(API.refresh, { method: 'POST' });
+        await loadProviderStatus();
         await loadStatus();
         await loadMessages();
         showToast('✓ Refreshed all platforms', 'success');
@@ -893,6 +1039,15 @@ function setupEventListeners() {
         refreshBtn.classList.remove('spinning');
       }
     });
+  }
+
+  const gmailPill = $('status-gmail');
+  if (gmailPill) {
+    gmailPill.addEventListener('click', toggleGmailConnection);
+  }
+  const slackPill = $('status-slack');
+  if (slackPill) {
+    slackPill.addEventListener('click', toggleSlackConnection);
   }
 
   // Mobile tool-log drawer
@@ -995,4 +1150,15 @@ function relativeTime(isoStr) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function consumeQueryFlag(name) {
+  const url = new URL(window.location.href);
+  const value = url.searchParams.get(name);
+  if (value != null) {
+    url.searchParams.delete(name);
+    const clean = url.pathname + (url.search ? url.search : '') + (url.hash || '');
+    window.history.replaceState({}, '', clean);
+  }
+  return value;
 }

@@ -16,6 +16,38 @@ python main.py               # MCP stdio (for Claude Desktop)
 
 ---
 
+## Multi-User Web OAuth (ChatNest Connect)
+
+This branch adds per-user login sessions and per-user Gmail/Slack tokens in SQLite.
+`data/token.json` is no longer the primary auth model for the UI flow.
+
+Configure these in `.env`:
+
+```bash
+APP_BASE_URL=http://localhost:8000
+AUTH_ENCRYPTION_KEY=...                         # Fernet key recommended
+GOOGLE_OAUTH_CLIENT_ID=...
+GOOGLE_OAUTH_CLIENT_SECRET=...
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:8000/auth/google/callback
+SLACK_OAUTH_CLIENT_ID=...
+SLACK_OAUTH_CLIENT_SECRET=...
+SLACK_OAUTH_REDIRECT_URI=http://localhost:8000/auth/slack/callback
+```
+
+Then run:
+
+```bash
+python -m uvicorn ui.server:app --host 0.0.0.0 --port 8000
+```
+
+In ChatNest:
+1. Sign in with email/password (auto-register on first sign-in)
+2. Click the Gmail or Slack status pill
+3. Complete provider consent
+4. You return to ChatNest with the provider connected for your own user account
+
+---
+
 ## Gmail — OAuth2 Setup
 
 ### 1. Create a Google Cloud project

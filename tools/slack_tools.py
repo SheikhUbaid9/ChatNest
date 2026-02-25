@@ -16,7 +16,11 @@ from typing import Any
 from clients.slack_client import (
     get_slack_client,
     get_slack_data,
+    get_slack_data_for_user,
+    get_slack_thread_for_user,
+    is_slack_connected_for_user,
     MOCK_MESSAGES,
+    send_slack_message_for_user,
 )
 from config import get_settings
 from database import (
@@ -31,8 +35,8 @@ logger = logging.getLogger(__name__)
 
 # ── Shared tool-log helper (mirrors gmail_tools pattern) ─────────────────────
 
-async def _timed_tool(name: str, platform: str = "slack"):
-    log_id = await log_tool_call(name, platform)
+async def _timed_tool(name: str, platform: str = "slack", user_id: str = "global"):
+    log_id = await log_tool_call(name, platform, user_id=user_id)
     start = time.monotonic()
 
     class _Ctx:
@@ -55,6 +59,7 @@ async def _timed_tool(name: str, platform: str = "slack"):
 async def get_slack_messages(
     channel: str | None = None,
     limit: int = 20,
+    user_id: str = "global",
 ) -> dict[str, Any]:
     """
     Fetch recent Slack messages (real or mock).
@@ -71,10 +76,16 @@ async def get_slack_messages(
       is_mock    : True when using demo data
       demo_mode  : True when token not configured
     """
-    ctx = await _timed_tool("get_slack_messages")
+    ctx = await _timed_tool("get_slack_messages", user_id=user_id)
 
     try:
-        if channel:
+        if user_id != "global":
+            messages, is_mock = get_slack_data_for_user(
+                user_id=user_id,
+                channel=channel,
+                limit=limit,
+            )
+        elif channel:
             # Filter mock data by channel when in demo mode
             settings = get_settings()
             if not settings.slack_enabled:
@@ -92,7 +103,7 @@ async def get_slack_messages(
             messages, is_mock = get_slack_data(limit=limit)
 
         if messages:
-            await upsert_messages(messages)
+            await upsert_messages(messages, user_id=user_id)
 
         channels = sorted({m.get("channel", "") for m in messages if m.get("channel")})
         summary = f"{len(messages)} messages from {len(channels)} channels {'(mock)' if is_mock else '(live)'}"
@@ -117,6 +128,7 @@ async def send_slack_message(
     channel: str,
     text: str,
     thread_ts: str | None = None,
+    user_id: str = "global",
 ) -> dict[str, Any]:
     """
     Post a message to a Slack channel or reply in a thread.
@@ -129,11 +141,23 @@ async def send_slack_message(
 
     Returns success status and confirmation.
     """
-    ctx = await _timed_tool("send_slack_message")
+    ctx = await _timed_tool("send_slack_message", user_id=user_id)
     settings = get_settings()
 
     try:
-        if not settings.slack_enabled:
+        if user_id != "global" and not is_slack_connected_for_user(user_id):
+            dest = f"{channel}" + (f" (thread {thread_ts})" if thread_ts else "")
+            await ctx.done(f"[Demo] Message to {dest} simulated")
+            return {
+                "tool": "send_slack_message",
+                "success": True,
+                "demo_mode": True,
+                "channel": channel,
+                "message": "[Demo Mode] Connect Slack to send real messages.",
+                "text_preview": text[:80] + "..." if len(text) > 80 else text,
+            }
+
+        if user_id == "global" and not settings.slack_enabled:
             dest = f"{channel}" + (f" (thread {thread_ts})" if thread_ts else "")
             await ctx.done(f"[Demo] Message to {dest} simulated")
             return {
@@ -145,12 +169,20 @@ async def send_slack_message(
                 "text_preview": text[:80] + "..." if len(text) > 80 else text,
             }
 
-        client = get_slack_client()
-        success = client.send_message(
-            channel=channel,
-            text=text,
-            thread_ts=thread_ts,
-        )
+        if user_id != "global":
+            success = await send_slack_message_for_user(
+                user_id=user_id,
+                channel=channel,
+                text=text,
+                thread_ts=thread_ts,
+            )
+        else:
+            client = get_slack_client()
+            success = client.send_message(
+                channel=channel,
+                text=text,
+                thread_ts=thread_ts,
+            )
 
         dest = channel + (f" (thread)" if thread_ts else "")
         await ctx.done(f"Message sent to {dest}")
@@ -170,7 +202,9 @@ async def send_slack_message(
         return {
             "tool": "send_slack_message",
             "success": False,
-            "demo_mode": not settings.slack_enabled,
+            "demo_mode": (user_id == "global" and not settings.slack_enabled) or (
+                user_id != "global" and not is_slack_connected_for_user(user_id)
+            ),
             "channel": channel,
             "message": f"Failed to send message: {exc}",
         }
@@ -179,6 +213,7 @@ async def send_slack_message(
 async def summarize_slack_thread(
     thread_id: str,
     channel: str | None = None,
+    user_id: str = "global",
 ) -> dict[str, Any]:
     """
     Fetch all messages in a Slack thread and return them formatted
@@ -191,11 +226,13 @@ async def summarize_slack_thread(
 
     Returns a structured thread object with all messages.
     """
-    ctx = await _timed_tool("summarize_slack_thread")
+    ctx = await _timed_tool("summarize_slack_thread", user_id=user_id)
     settings = get_settings()
 
     try:
-        if not settings.slack_enabled:
+        if (user_id != "global" and not is_slack_connected_for_user(user_id)) or (
+            user_id == "global" and not settings.slack_enabled
+        ):
             # Demo: return the matching mock message as a single-item thread
             mock_msgs = [m for m in MOCK_MESSAGES if m.get("thread_id") == thread_id]
             if not mock_msgs:
@@ -228,11 +265,18 @@ async def summarize_slack_thread(
                 "message": f"Invalid thread_id format: {thread_id}",
             }
 
-        client = get_slack_client()
-        messages = client.get_thread_messages(
-            channel=ch_name,
-            thread_ts=thread_ts,
-        )
+        if user_id != "global":
+            messages = await get_slack_thread_for_user(
+                user_id=user_id,
+                channel=ch_name,
+                thread_ts=thread_ts,
+            )
+        else:
+            client = get_slack_client()
+            messages = client.get_thread_messages(
+                channel=ch_name,
+                thread_ts=thread_ts,
+            )
 
         thread_text = _format_thread_for_summary(messages)
         await ctx.done(f"Thread fetched ({len(messages)} messages)")

@@ -9,8 +9,9 @@ Demo mode  : Returns realistic mock data when credentials.json is absent
 
 from __future__ import annotations
 
+import asyncio
 import base64
-import email as email_lib
+import json
 import logging
 import re
 from datetime import datetime, timezone, timedelta
@@ -18,7 +19,9 @@ from email.mime.text import MIMEText
 from functools import lru_cache
 from typing import Any
 
+from auth_security import decrypt_secret, encrypt_secret
 from config import get_settings
+from database import get_provider_token_sync, upsert_provider_token_sync
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,7 @@ logger = logging.getLogger(__name__)
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 # ── Mock data ─────────────────────────────────────────────────────────────────
@@ -343,6 +347,80 @@ def get_gmail_client() -> GmailClient:
     return GmailClient()
 
 
+class UserScopedGmailClient(GmailClient):
+    """Gmail client that authenticates with per-user OAuth tokens from DB."""
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__()
+        self.user_id = user_id
+
+    def _build_service(self) -> Any:
+        if self._service:
+            return self._service
+
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+
+        row = get_provider_token_sync(self.user_id, "gmail")
+        if not row:
+            raise RuntimeError("No Gmail token found for this user")
+
+        access_token = decrypt_secret(row.get("access_token") or "")
+        refresh_token = decrypt_secret(row.get("refresh_token") or "") if row.get("refresh_token") else ""
+        token_uri = decrypt_secret(row.get("token_uri") or "") if row.get("token_uri") else "https://oauth2.googleapis.com/token"
+        client_id = decrypt_secret(row.get("client_id") or "") if row.get("client_id") else ""
+        client_secret = decrypt_secret(row.get("client_secret") or "") if row.get("client_secret") else ""
+
+        scopes_raw = row.get("scopes") or "[]"
+        try:
+            scopes = json.loads(scopes_raw)
+        except Exception:
+            scopes = SCOPES
+
+        creds = Credentials(
+            token=access_token,
+            refresh_token=refresh_token or None,
+            token_uri=token_uri or "https://oauth2.googleapis.com/token",
+            client_id=client_id or None,
+            client_secret=client_secret or None,
+            scopes=scopes or SCOPES,
+        )
+
+        expiry_raw = row.get("expiry")
+        if expiry_raw:
+            try:
+                creds.expiry = datetime.fromisoformat(str(expiry_raw))
+            except Exception:
+                pass
+
+        if not creds.valid:
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                upsert_provider_token_sync(
+                    self.user_id,
+                    "gmail",
+                    access_token=encrypt_secret(creds.token or ""),
+                    refresh_token=encrypt_secret(creds.refresh_token or refresh_token) if (creds.refresh_token or refresh_token) else "",
+                    token_uri=encrypt_secret(creds.token_uri or token_uri),
+                    client_id=encrypt_secret(client_id),
+                    client_secret=encrypt_secret(client_secret),
+                    scopes=list(creds.scopes or scopes or SCOPES),
+                    expiry=creds.expiry.isoformat() if creds.expiry else "",
+                    account_email=row.get("account_email") or "",
+                )
+            else:
+                raise RuntimeError("Gmail token expired and no refresh token is available")
+
+        self._service = build("gmail", "v1", credentials=creds)
+        return self._service
+
+
+@lru_cache(maxsize=256)
+def get_user_gmail_client(user_id: str) -> UserScopedGmailClient:
+    return UserScopedGmailClient(user_id)
+
+
 def get_gmail_data(max_results: int = 20) -> tuple[list[dict[str, Any]], bool]:
     """
     Public entry point used by gmail_tools.py.
@@ -363,3 +441,46 @@ def get_gmail_data(max_results: int = 20) -> tuple[list[dict[str, Any]], bool]:
     except Exception as exc:
         logger.warning("Gmail API error (%s) — falling back to mock data", exc)
         return MOCK_EMAILS, True
+
+
+async def get_gmail_data_for_user(
+    user_id: str,
+    max_results: int = 20,
+) -> tuple[list[dict[str, Any]], bool]:
+    """
+    Per-user Gmail data path backed by OAuth tokens in provider_tokens.
+    Returns (messages, is_mock).
+    """
+    row = get_provider_token_sync(user_id, "gmail")
+    if not row:
+        return MOCK_EMAILS, True
+
+    try:
+        client = get_user_gmail_client(user_id)
+        emails = await asyncio.to_thread(client.get_unread_emails, max_results)
+        logger.info("Gmail(user=%s): fetched %d real emails", user_id, len(emails))
+        return emails, False
+    except Exception as exc:
+        logger.warning("Gmail(user=%s) API error (%s) — fallback mock", user_id, exc)
+        return MOCK_EMAILS, True
+
+
+async def send_gmail_reply_for_user(
+    user_id: str,
+    thread_id: str,
+    to: str,
+    subject: str,
+    body: str,
+) -> bool:
+    client = get_user_gmail_client(user_id)
+    return await asyncio.to_thread(client.send_reply, thread_id, to, subject, body)
+
+
+async def mark_gmail_read_for_user(user_id: str, message_id: str) -> bool:
+    client = get_user_gmail_client(user_id)
+    return await asyncio.to_thread(client.mark_as_read, message_id)
+
+
+async def get_gmail_thread_for_user(user_id: str, thread_id: str) -> list[dict[str, Any]]:
+    client = get_user_gmail_client(user_id)
+    return await asyncio.to_thread(client.get_thread, thread_id)

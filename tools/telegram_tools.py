@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 
 # ── Shared tool-log helper ────────────────────────────────────────────────────
 
-async def _timed_tool(name: str, platform: str = "telegram"):
-    log_id = await log_tool_call(name, platform)
+async def _timed_tool(name: str, platform: str = "telegram", user_id: str = "global"):
+    log_id = await log_tool_call(name, platform, user_id=user_id)
     start = time.monotonic()
 
     class _Ctx:
@@ -54,7 +54,7 @@ async def _timed_tool(name: str, platform: str = "telegram"):
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
-async def get_telegram_messages(limit: int = 20) -> dict[str, Any]:
+async def get_telegram_messages(limit: int = 20, user_id: str = "global") -> dict[str, Any]:
     """
     Fetch pending Telegram messages from the bot inbox (real or mock).
 
@@ -71,13 +71,13 @@ async def get_telegram_messages(limit: int = 20) -> dict[str, Any]:
       is_mock    : True when using demo data
       demo_mode  : True when token not configured
     """
-    ctx = await _timed_tool("get_telegram_messages")
+    ctx = await _timed_tool("get_telegram_messages", user_id=user_id)
 
     try:
         messages, is_mock = await get_telegram_data_async(limit=limit)
 
         if messages:
-            await upsert_messages(messages)
+            await upsert_messages(messages, user_id=user_id)
 
         chats = sorted({m.get("channel", "") for m in messages if m.get("channel")})
         summary = (
@@ -105,6 +105,7 @@ async def send_telegram_reply(
     chat_id: int | str,
     text: str,
     message_id: str | None = None,
+    user_id: str = "global",
 ) -> dict[str, Any]:
     """
     Send a reply to a Telegram chat or DM.
@@ -118,13 +119,13 @@ async def send_telegram_reply(
 
     Returns success status and confirmation.
     """
-    ctx = await _timed_tool("send_telegram_reply")
+    ctx = await _timed_tool("send_telegram_reply", user_id=user_id)
     settings = get_settings()
 
     try:
         # Mark the source message read in cache if provided
         if message_id:
-            await mark_read(message_id)
+            await mark_read(message_id, user_id=user_id)
 
         if not settings.telegram_enabled:
             await ctx.done(f"[Demo] Reply to chat {chat_id} simulated")
@@ -169,6 +170,7 @@ async def summarize_telegram_chat(
     chat_id: int | str | None = None,
     thread_id: str | None = None,
     limit: int = 20,
+    user_id: str = "global",
 ) -> dict[str, Any]:
     """
     Fetch messages from a Telegram chat and return them formatted
@@ -184,7 +186,7 @@ async def summarize_telegram_chat(
 
     Returns a structured chat object with all messages.
     """
-    ctx = await _timed_tool("summarize_telegram_chat")
+    ctx = await _timed_tool("summarize_telegram_chat", user_id=user_id)
     settings = get_settings()
 
     try:
