@@ -22,7 +22,7 @@ import asyncio
 import logging
 import sys
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP # pyright: ignore[reportMissingImports]
 
 from config import get_settings
 from database import init_db

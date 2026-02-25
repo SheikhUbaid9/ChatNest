@@ -1,0 +1,31 @@
+ChatNest / MCP Inbox is a full app that combines Gmail, Slack, and Telegram into one inbox, with AI summarize/draft and reply actions, plus MCP tool access for Claude.
+
+Core Stack
+
+Backend: Python, FastAPI, FastMCP
+Data: SQLite (aiosqlite)
+Frontend: Server-rendered HTML + static JS/CSS (no React)
+Realtime: WebSocket tool-log stream
+Integrations: Gmail API, Slack SDK, Telegram Bot API, Telethon
+AI: Gemini (google-generativeai) + Ollama fallback
+Deploy/runtime: Docker Compose + Vercel route config
+Security (feature branch): PBKDF2 password hashing + encrypted token storage (cryptography/Fernet)
+Branch Comparison
+
+Area	main	feature/multi-user-oauth-gmail
+App completeness	Complete single-account app	Complete multi-user app (Gmail/Slack)
+Auth model	Frontend demo login gate (not real user backend)	Real register/login/logout sessions
+Gmail auth	Global credentials/token files (credentials.json/token.json)	Per-user web OAuth + DB token storage
+Slack auth	Global SLACK_BOT_TOKEN	Per-user Slack OAuth + DB token storage
+Telegram	Global bot/personal setup	Same as main (no per-user Telegram OAuth yet)
+Data isolation	Shared/global behavior	Per-user scoping (user_id) across messages/logs/actions
+OAuth routes	Not present for per-user connect	/auth/google/*, /auth/slack/*, provider status/disconnect APIs
+Token storage	File/env based	provider_tokens table, encrypted values
+DB schema	Basic tables (messages, read_state, tool_log)	Adds users, user_sessions, provider_tokens, oauth_state
+Current Situation in Your Repo
+
+You are on feature/multi-user-oauth-gmail at commit a0e0a9f.
+This branch is 1 commit ahead of main (the multi-user OAuth implementation commit).
+Working tree is clean.
+Feature branch code is ready, but your local .env still misses OAuth vars (GOOGLE_OAUTH_*, SLACK_OAUTH_*, APP_BASE_URL, AUTH_ENCRYPTION_KEY).
+Your .env has mcp_inbox.db (container path), so local run should use mcp_inbox.db for local dev.

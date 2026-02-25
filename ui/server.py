@@ -31,11 +31,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi import Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect # pyright: ignore[reportMissingImports]
+from fastapi.responses import HTMLResponse, JSONResponse # pyright: ignore[reportMissingImports]
+from fastapi.staticfiles import StaticFiles # pyright: ignore[reportMissingImports]
+from fastapi.templating import Jinja2Templates # pyright: ignore[reportMissingImports]
+from fastapi import Request # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel
 
 from config import get_settings
