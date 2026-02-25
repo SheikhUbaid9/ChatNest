@@ -1,6 +1,8 @@
 /* ═══════════════════════════════════════════════════
-   MCP Inbox — Frontend Application
+   ChatNest — Frontend Application
    ═══════════════════════════════════════════════════ */
+
+const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
 
 const API = {
   status:       '/api/status',
@@ -16,7 +18,7 @@ const API = {
   sendReply:    '/api/send-reply',
   draftReply:   '/api/draft-reply',
   ollamaStatus: '/api/ollama/status',
-  wsToolLog:    `ws://${location.host}/ws/tool-log`,
+  wsToolLog:    `${WS_PROTO}://${location.host}/ws/tool-log`,
 };
 
 /* ── State ─────────────────────────────────────────── */
@@ -42,17 +44,250 @@ const PLATFORMS = {
 /* ── DOM refs ──────────────────────────────────────── */
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
+const MOBILE_BREAKPOINT = 920;
+const DEMO_AUTH_KEY = 'chatnest_demo_auth_v1';
+let appBootstrapped = false;
+
+function isMobileView() {
+  return window.innerWidth <= MOBILE_BREAKPOINT;
+}
+
+function openToolLogDrawer() {
+  if (!isMobileView()) return;
+  document.body.classList.add('toollog-open');
+}
+
+function closeToolLogDrawer() {
+  document.body.classList.remove('toollog-open');
+}
+
+function toggleToolLogDrawer() {
+  if (!isMobileView()) return;
+  document.body.classList.toggle('toollog-open');
+}
+
+function syncToolLogDrawerLayout() {
+  if (!isMobileView()) {
+    closeToolLogDrawer();
+  }
+}
+
+async function bootstrapApp() {
+  if (appBootstrapped) return;
+  appBootstrapped = true;
+  connectWebSocket();
+  await loadStatus();
+  await loadMessages();
+  setInterval(loadStatus, 30_000);
+}
+
+function readDemoAuth() {
+  try {
+    const raw = localStorage.getItem(DEMO_AUTH_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveDemoAuth(payload) {
+  localStorage.setItem(DEMO_AUTH_KEY, JSON.stringify(payload));
+}
+
+function clearDemoAuth() {
+  localStorage.removeItem(DEMO_AUTH_KEY);
+}
+
+function formatDisplayName(email = '') {
+  const username = (email.split('@')[0] || 'guest').trim();
+  const clean = username
+    .replace(/[^a-zA-Z0-9._-]/g, ' ')
+    .split(/[._\-\s]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+  return clean || 'Guest';
+}
+
+function lockAppWithLogin() {
+  const gate = $('login-gate');
+  closeToolLogDrawer();
+  document.body.classList.add('login-locked');
+  if (gate) gate.hidden = false;
+}
+
+function unlockAppFromLogin() {
+  const gate = $('login-gate');
+  document.body.classList.remove('login-locked');
+  if (gate) gate.hidden = true;
+}
+
+function applyAuthUI(session) {
+  const chip = $('user-chip');
+  const label = $('user-label');
+  const logout = $('logout-btn');
+  if (!chip || !label || !logout) return;
+
+  if (session) {
+    label.textContent = session.name || session.email || 'Guest';
+    chip.style.display = 'inline-flex';
+    logout.style.display = 'inline-flex';
+  } else {
+    chip.style.display = 'none';
+    logout.style.display = 'none';
+  }
+}
+
+async function completeDemoLogin(session) {
+  applyAuthUI(session);
+  unlockAppFromLogin();
+  try {
+    saveDemoAuth(session);
+  } catch (e) {
+    console.warn('Unable to persist demo auth:', e);
+  }
+  try {
+    await bootstrapApp();
+  } catch (e) {
+    console.error('App bootstrap failed after login:', e);
+    showToast('Signed in, but failed to load inbox data', 'error');
+    return;
+  }
+  showToast(`Welcome ${session.name || session.email || 'Guest'}`, 'success');
+}
+
+async function initDemoLoginGate() {
+  const gate = $('login-gate');
+  if (!gate) {
+    await bootstrapApp();
+    return;
+  }
+
+  const emailInput = $('login-email');
+  const passInput = $('login-password');
+  const form = $('demo-login-form');
+  const googleBtn = $('login-google');
+  const appleBtn = $('login-apple');
+  const submitBtn = $('login-submit');
+  const togglePassBtn = $('login-toggle-password');
+  const logoutBtn = $('logout-btn');
+  const loginCard = gate.querySelector('.login-card');
+  const controls = [emailInput, passInput, submitBtn, togglePassBtn, googleBtn, appleBtn]
+    .filter(Boolean);
+
+  const setLoading = (enabled) => {
+    if (loginCard) loginCard.classList.remove('is-loading');
+    controls.forEach(ctrl => {
+      ctrl.disabled = enabled;
+    });
+  };
+
+  const loginWithTransition = async (session) => {
+    setLoading(true);
+    try {
+      await completeDemoLogin(session);
+    } catch (e) {
+      console.error('Login flow failed:', e);
+      showToast('Unable to sign in right now', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const session = readDemoAuth();
+  applyAuthUI(session);
+
+  if (session) {
+    unlockAppFromLogin();
+    await bootstrapApp();
+  } else {
+    lockAppWithLogin();
+  }
+
+  if (togglePassBtn && passInput) {
+    togglePassBtn.addEventListener('click', () => {
+      const isHidden = passInput.type === 'password';
+      passInput.type = isHidden ? 'text' : 'password';
+      togglePassBtn.textContent = isHidden ? 'Hide' : 'Show';
+    });
+  }
+
+  if (form && emailInput && passInput) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const email = emailInput.value.trim().toLowerCase();
+      const password = passInput.value;
+
+      if (!email || !email.includes('@')) {
+        showToast('Enter a valid email address', 'error');
+        emailInput.focus();
+        return;
+      }
+      if (!password || password.length < 4) {
+        showToast('Password must be at least 4 characters', 'error');
+        passInput.focus();
+        return;
+      }
+
+      await loginWithTransition({
+        provider: 'email',
+        email,
+        name: formatDisplayName(email),
+        logged_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  if (googleBtn) {
+    googleBtn.addEventListener('click', async () => {
+      const seededEmail = (emailInput?.value || '').trim().toLowerCase();
+      const email = seededEmail && seededEmail.includes('@')
+        ? seededEmail
+        : 'google.user@chatnest.app';
+      await loginWithTransition({
+        provider: 'google',
+        email,
+        name: formatDisplayName(email),
+        logged_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  if (appleBtn) {
+    appleBtn.addEventListener('click', async () => {
+      const seededEmail = (emailInput?.value || '').trim().toLowerCase();
+      const email = seededEmail && seededEmail.includes('@')
+        ? seededEmail
+        : 'apple.user@chatnest.app';
+      await loginWithTransition({
+        provider: 'apple',
+        email,
+        name: formatDisplayName(email),
+        logged_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      clearDemoAuth();
+      applyAuthUI(null);
+      setLoading(false);
+      lockAppWithLogin();
+      if (emailInput) emailInput.focus();
+      showToast('Signed out', 'success');
+    });
+  }
+}
 
 /* ══════════════════════════════════════════════════
    INIT
    ══════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
-  connectWebSocket();
-  await loadStatus();
-  await loadMessages();
-  // Poll unread counts every 30 s
-  setInterval(loadStatus, 30_000);
+  await initDemoLoginGate();
 });
 
 /* ══════════════════════════════════════════════════
@@ -301,7 +536,7 @@ async function doSummarize(msgId) {
         <span class="summary-model" style="margin-left:auto;opacity:0.5">thinking…</span>
       </div>
       <div class="summary-text" style="color:var(--muted)">
-        <span class="calling-pulse">Summarizing with Ollama llama3.2…</span>
+        <span class="calling-pulse">Summarizing with AI…</span>
       </div>
     </div>`;
   cardBody.insertBefore(placeholder, cardBody.querySelector('.card-actions'));
@@ -337,12 +572,12 @@ async function doSummarize(msgId) {
 
     const label = data.ollama_running
       ? `✦ Summarized with ${data.model}`
-      : '✦ Summary ready (Ollama offline — extractive)';
+      : '✦ Summary ready (AI offline — extractive)';
     showToast(label, 'success');
 
   } catch (e) {
     cardBody.querySelector('.summary-result')?.remove();
-    showToast('Summarization failed — is Ollama running?', 'error');
+    showToast('Summarization failed', 'error');
   }
 }
 
@@ -422,9 +657,12 @@ async function aiDraftReply() {
     if (textarea) {
       if (data.draft) {
         textarea.value = data.draft;
-        showToast(`✦ AI draft ready (${data.model})`, 'success');
+        const label = data.ollama_running
+          ? `✦ AI draft ready (${data.model})`
+          : '✦ Draft ready (template fallback)';
+        showToast(label, 'success');
       } else {
-        showToast('Ollama offline — start it with: ollama serve', 'error');
+        showToast(data.message || 'AI draft unavailable', 'error');
       }
     }
   } catch (e) {
@@ -615,6 +853,7 @@ function setupEventListeners() {
       tab.classList.add('active');
       state.activeTab = platform;
       loadMessages(platform);
+      closeToolLogDrawer();
     });
   });
 
@@ -633,6 +872,7 @@ function setupEventListeners() {
 
       state.activeTab = platform;
       loadMessages(platform);
+      closeToolLogDrawer();
     });
   });
 
@@ -640,6 +880,7 @@ function setupEventListeners() {
   const refreshBtn = $('refresh-btn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async () => {
+      closeToolLogDrawer();
       refreshBtn.classList.add('spinning');
       try {
         await apiFetch(API.refresh, { method: 'POST' });
@@ -653,6 +894,24 @@ function setupEventListeners() {
       }
     });
   }
+
+  // Mobile tool-log drawer
+  const toolLogToggle = $('toollog-toggle');
+  const toolLogBackdrop = $('toollog-backdrop');
+
+  if (toolLogToggle) {
+    toolLogToggle.addEventListener('click', toggleToolLogDrawer);
+  }
+
+  if (toolLogBackdrop) {
+    toolLogBackdrop.addEventListener('click', closeToolLogDrawer);
+  }
+
+  window.addEventListener('resize', syncToolLogDrawerLayout);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeToolLogDrawer();
+  });
+  syncToolLogDrawerLayout();
 }
 
 /* ══════════════════════════════════════════════════

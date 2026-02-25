@@ -7,6 +7,8 @@ works in Demo Mode without any API keys.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -31,6 +33,8 @@ class Settings(BaseSettings):
     # ── Gmail ────────────────────────────────────────────────────────────
     gmail_credentials_path: Path = Path("./credentials.json")
     gmail_token_path: Path = Path("./token.json")
+    gmail_credentials_json: str = ""
+    gmail_token_json: str = ""
     gmail_user: str = "me"
 
     # ── Slack ────────────────────────────────────────────────────────────
@@ -70,6 +74,17 @@ class Settings(BaseSettings):
         Mark each platform as enabled only when the minimum required
         credential exists.  Falls back to mock data otherwise.
         """
+        self.gmail_credentials_path = self._materialize_json_secret(
+            raw_value=self.gmail_credentials_json,
+            preferred_path=self.gmail_credentials_path,
+            fallback_name="credentials.json",
+        )
+        self.gmail_token_path = self._materialize_json_secret(
+            raw_value=self.gmail_token_json,
+            preferred_path=self.gmail_token_path,
+            fallback_name="token.json",
+        )
+
         if not self.force_mock:
             self.gmail_enabled = self.gmail_credentials_path.exists()
             self.slack_enabled = bool(
@@ -90,11 +105,50 @@ class Settings(BaseSettings):
 
         return self
 
+    def _materialize_json_secret(
+        self,
+        raw_value: str,
+        preferred_path: Path,
+        fallback_name: str,
+    ) -> Path:
+        """
+        Persist JSON secret from env var to disk so file-based clients can use it.
+        Accepts plain JSON or base64-encoded JSON.
+        """
+        if not raw_value.strip():
+            return preferred_path
+
+        payload = raw_value.strip()
+        if not payload.startswith("{"):
+            try:
+                payload = base64.b64decode(payload).decode("utf-8")
+            except Exception:
+                # Keep original payload if it's not valid base64.
+                pass
+
+        try:
+            json.loads(payload)
+        except Exception:
+            logger.warning("Invalid JSON for %s; skipping secret materialization", fallback_name)
+            return preferred_path
+
+        candidates = [preferred_path, Path("/tmp") / fallback_name]
+        for path in candidates:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(payload, encoding="utf-8")
+                return path.resolve()
+            except Exception:
+                continue
+
+        logger.warning("Could not write %s to disk; Gmail may run in demo mode", fallback_name)
+        return preferred_path
+
     # ── Convenience ──────────────────────────────────────────────────────
     @property
     def demo_mode(self) -> bool:
-        """True when at least one platform is using mock data."""
-        return not (self.gmail_enabled and self.slack_enabled and self.telegram_enabled)
+        """True only when no platform is connected live."""
+        return not (self.gmail_enabled or self.slack_enabled or self.telegram_enabled)
 
     @property
     def enabled_platforms(self) -> list[str]:

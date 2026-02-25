@@ -1,0 +1,11 @@
+{
+    "env": {
+      "DATABASE_PATH": "/tmp/mcp_inbox.db"
+    },
+    "builds": [
+      { "src": "ui/server.py", "use": "@vercel/python" }
+    ],
+    "routes": [
+      { "src": "/(.*)", "dest": "ui/server.py" }
+    ]
+  }

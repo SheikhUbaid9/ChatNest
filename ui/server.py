@@ -1,5 +1,5 @@
 """
-ui/server.py — FastAPI backend for MCP Inbox UI.
+ui/server.py — FastAPI backend for ChatNest UI.
 
 REST endpoints:
   GET  /                        → serve index.html
@@ -12,9 +12,10 @@ REST endpoints:
   POST /api/mark-read           → mark message as read
   POST /api/refresh             → force re-fetch from all platforms
   GET  /api/tool-log            → recent MCP tool call history
-  POST /api/summarize           → LLM summarize via Ollama
+  POST /api/summarize           → LLM summarize via configured AI provider
   POST /api/send-reply          → send reply via platform client
-  GET  /api/ollama/status       → Ollama availability + models
+  GET  /api/ai/status           → AI provider availability + model info
+  GET  /api/ollama/status       → legacy alias to /api/ai/status
   GET  /api/telegram/test      → test Telegram bot connectivity + proxy status
 
 WebSocket:
@@ -52,7 +53,15 @@ from tools.slack_tools import get_slack_messages, send_slack_message
 from tools.telegram_tools import get_telegram_messages, send_telegram_reply
 from clients.telegram_client import get_telegram_data_async as _tg_fetch
 from clients.telethon_client import get_personal_telegram_data, get_telethon_client
+from clients.gemini_client import (
+    GEMINI_MODEL,
+    draft_reply_gemini,
+    get_ai_provider_preference,
+    is_gemini_ready,
+    summarize_message_gemini,
+)
 from clients.ollama_client import (
+    OLLAMA_BASE,
     is_ollama_running,
     list_models,
     summarize_message,
@@ -139,7 +148,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Startup prefetch failed: %s", exc)
     # Start background poller
     task = asyncio.create_task(_poll_tool_log())
-    logger.info("MCP Inbox UI server ready")
+    logger.info("ChatNest UI server ready")
     yield
     task.cancel()
 
@@ -147,7 +156,7 @@ async def lifespan(app: FastAPI):
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="MCP Inbox",
+    title="ChatNest",
     description="AI Communication Hub — Gmail · Slack · Telegram",
     version="1.0.0",
     lifespan=lifespan,
@@ -225,6 +234,52 @@ def _format_tool_log(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_template_draft(
+    original_body: str,
+    sender: str = "",
+    instructions: str = "",
+) -> str:
+    """Simple non-LLM fallback draft used when Ollama is unavailable."""
+    sender_name = (sender or "").strip().split("@")[0].split()[0] if sender else ""
+    greeting = f"Hi {sender_name}," if sender_name else "Hi,"
+
+    first_line = " ".join((original_body or "").strip().split())
+    if first_line:
+        if len(first_line) > 110:
+            first_line = first_line[:107].rstrip() + "..."
+        ack = f'Thanks for your message about "{first_line}".'
+    else:
+        ack = "Thanks for your message."
+
+    next_step = instructions.strip() or "I will review this and get back to you shortly."
+
+    return f"{greeting}\n\n{ack} {next_step}\n\nBest,\n"
+
+
+def _extractive_summary(body: str, sentence_limit: int = 3) -> str:
+    """Simple fallback summary from the first N sentences."""
+    sentences = [s.strip() for s in body.replace("\n", " ").split(".") if s.strip()]
+    return ". ".join(sentences[:sentence_limit]) + ("." if sentences else "")
+
+
+def _select_ai_provider() -> str:
+    """
+    Select AI provider using env preference:
+    - AI_PROVIDER=gemini: Gemini only (if configured), else none
+    - AI_PROVIDER=ollama: Ollama only
+    - AI_PROVIDER=auto (default): Gemini first, then Ollama
+    """
+    preferred = get_ai_provider_preference()
+    gemini_ready = is_gemini_ready()
+
+    if preferred == "gemini":
+        return "gemini" if gemini_ready else "none"
+    if preferred == "ollama":
+        return "ollama"
+    # auto
+    return "gemini" if gemini_ready else "ollama"
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -234,6 +289,11 @@ async def index(request: Request):
     if not index_path.exists():
         return HTMLResponse("<h1>UI not built yet — run Step 12</h1>", status_code=503)
     return templates.TemplateResponse(request, "index.html")
+
+
+@app.get("/health")
+async def health() -> JSONResponse:
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/status")
@@ -444,9 +504,36 @@ async def telegram_personal_status() -> JSONResponse:
 
 # ── Ollama / LLM endpoints ────────────────────────────────────────────────────
 
+@app.get("/api/ai/status")
 @app.get("/api/ollama/status")
 async def ollama_status() -> JSONResponse:
-    """Check if Ollama is running and return available models."""
+    """
+    Backward-compatible AI status endpoint.
+    Route name is kept for frontend compatibility.
+    """
+    provider = _select_ai_provider()
+
+    if provider == "gemini":
+        return JSONResponse({
+            "running": True,
+            "models": [GEMINI_MODEL],
+            "best_model": GEMINI_MODEL,
+            "base_url": "https://generativelanguage.googleapis.com",
+            "provider": "gemini",
+            "configured": True,
+        })
+
+    if provider == "none":
+        return JSONResponse({
+            "running": False,
+            "models": [],
+            "best_model": None,
+            "base_url": "https://generativelanguage.googleapis.com",
+            "provider": "gemini",
+            "configured": False,
+            "message": "GEMINI_API_KEY missing or SDK unavailable",
+        })
+
     running = await is_ollama_running()
     models = await list_models() if running else []
     best = await get_best_available_model() if running else None
@@ -454,7 +541,9 @@ async def ollama_status() -> JSONResponse:
         "running": running,
         "models": models,
         "best_model": best,
-        "base_url": "http://localhost:11434",
+        "base_url": OLLAMA_BASE,
+        "provider": "ollama",
+        "configured": running,
     })
 
 
@@ -469,39 +558,59 @@ class SummarizeRequest(BaseModel):
 @app.post("/api/summarize")
 async def api_summarize(req: SummarizeRequest) -> JSONResponse:
     """
-    Summarize a message body using the local Ollama LLM.
-    Falls back to an extractive summary if Ollama is not running.
+    Summarize a message body using configured AI provider.
+    Falls back to extractive summary if provider is unavailable.
     """
-    running = await is_ollama_running()
+    provider = _select_ai_provider()
 
-    if not running:
-        # Extractive fallback — first 3 sentences
-        sentences = [s.strip() for s in req.body.replace("\n", " ").split(".") if s.strip()]
-        fallback = ". ".join(sentences[:3]) + ("." if sentences else "")
-        return JSONResponse({
-            "summary": fallback,
-            "model": "extractive-fallback",
-            "ollama_running": False,
-            "message": "Ollama not running — showing extractive summary. Start Ollama for AI summaries.",
-        })
+    if provider == "gemini":
+        try:
+            model = req.model or GEMINI_MODEL
+            summary = await summarize_message_gemini(
+                body=req.body,
+                platform=req.platform,
+                sender=req.sender,
+                model=model,
+            )
+            return JSONResponse({
+                "summary": summary,
+                "model": model,
+                "ollama_running": True,  # compatibility with current frontend flag
+                "provider": "gemini",
+                "message": f"Summarized using {model}",
+            })
+        except Exception as exc:
+            logger.warning("Gemini summarize failed, falling back: %s", exc)
 
-    try:
-        model = req.model or await get_best_available_model()
-        summary = await summarize_message(
-            body=req.body,
-            platform=req.platform,
-            sender=req.sender,
-            model=model,
-        )
-        return JSONResponse({
-            "summary": summary,
-            "model": model,
-            "ollama_running": True,
-            "message": f"Summarized using {model}",
-        })
-    except Exception as exc:
-        logger.exception("Summarize failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+    if provider == "ollama":
+        running = await is_ollama_running()
+        if running:
+            try:
+                model = req.model or await get_best_available_model()
+                summary = await summarize_message(
+                    body=req.body,
+                    platform=req.platform,
+                    sender=req.sender,
+                    model=model,
+                )
+                return JSONResponse({
+                    "summary": summary,
+                    "model": model,
+                    "ollama_running": True,
+                    "provider": "ollama",
+                    "message": f"Summarized using {model}",
+                })
+            except Exception as exc:
+                logger.warning("Ollama summarize failed, falling back: %s", exc)
+
+    fallback = _extractive_summary(req.body, sentence_limit=3)
+    return JSONResponse({
+        "summary": fallback,
+        "model": "extractive-fallback",
+        "ollama_running": False,
+        "provider": "fallback",
+        "message": "AI unavailable — showing extractive summary.",
+    })
 
 
 class SendReplyRequest(BaseModel):
@@ -525,11 +634,17 @@ async def api_send_reply(req: SendReplyRequest) -> JSONResponse:
     """
     body = req.body
 
-    # AI-draft mode: generate reply text with Ollama
+    # AI-draft mode: generate reply text with configured provider
     if req.use_ai_draft and req.original_body:
-        running = await is_ollama_running()
-        if running:
-            try:
+        provider = _select_ai_provider()
+        try:
+            if provider == "gemini":
+                body = await draft_reply_gemini(
+                    original_body=req.original_body,
+                    platform=req.platform,
+                    sender=req.sender_email,
+                )
+            elif provider == "ollama" and await is_ollama_running():
                 model = await get_best_available_model()
                 body = await draft_reply(
                     original_body=req.original_body,
@@ -537,8 +652,18 @@ async def api_send_reply(req: SendReplyRequest) -> JSONResponse:
                     sender=req.sender_email,
                     model=model,
                 )
-            except Exception as exc:
-                logger.warning("AI draft failed, using original body: %s", exc)
+            elif not body.strip():
+                body = _build_template_draft(
+                    original_body=req.original_body,
+                    sender=req.sender_email,
+                )
+        except Exception as exc:
+            logger.warning("AI draft failed, using existing body: %s", exc)
+            if not body.strip():
+                body = _build_template_draft(
+                    original_body=req.original_body,
+                    sender=req.sender_email,
+                )
 
     # Route to correct platform tool
     try:
@@ -593,31 +718,61 @@ class DraftReplyRequest(BaseModel):
 
 @app.post("/api/draft-reply")
 async def api_draft_reply(req: DraftReplyRequest) -> JSONResponse:
-    """Use Ollama to draft a reply — returns draft text without sending."""
-    running = await is_ollama_running()
-    if not running:
-        return JSONResponse({
-            "draft": "",
-            "ollama_running": False,
-            "message": "Ollama not running — start it with: ollama serve",
-        })
-    try:
-        model = req.model or await get_best_available_model()
-        draft = await draft_reply(
-            original_body=req.original_body,
-            platform=req.platform,
-            sender=req.sender,
-            instructions=req.instructions,
-            model=model,
-        )
-        return JSONResponse({
-            "draft": draft,
-            "model": model,
-            "ollama_running": True,
-        })
-    except Exception as exc:
-        logger.exception("draft-reply failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+    """Draft a reply using configured AI provider; never returns empty draft."""
+    provider = _select_ai_provider()
+
+    if provider == "gemini":
+        try:
+            model = req.model or GEMINI_MODEL
+            draft = await draft_reply_gemini(
+                original_body=req.original_body,
+                platform=req.platform,
+                sender=req.sender,
+                instructions=req.instructions,
+                model=model,
+            )
+            return JSONResponse({
+                "draft": draft,
+                "model": model,
+                "ollama_running": True,  # compatibility with frontend flag
+                "provider": "gemini",
+            })
+        except Exception as exc:
+            logger.warning("Gemini draft failed, falling back: %s", exc)
+
+    if provider == "ollama":
+        running = await is_ollama_running()
+        if running:
+            try:
+                model = req.model or await get_best_available_model()
+                draft = await draft_reply(
+                    original_body=req.original_body,
+                    platform=req.platform,
+                    sender=req.sender,
+                    instructions=req.instructions,
+                    model=model,
+                )
+                return JSONResponse({
+                    "draft": draft,
+                    "model": model,
+                    "ollama_running": True,
+                    "provider": "ollama",
+                })
+            except Exception as exc:
+                logger.warning("Ollama draft failed, falling back: %s", exc)
+
+    fallback_draft = _build_template_draft(
+        original_body=req.original_body,
+        sender=req.sender,
+        instructions=req.instructions,
+    )
+    return JSONResponse({
+        "draft": fallback_draft,
+        "model": "template-fallback",
+        "ollama_running": False,
+        "provider": "fallback",
+        "message": "AI unavailable — returned template draft",
+    })
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────

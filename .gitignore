@@ -1,0 +1,13 @@
+# Environment variables
+.env
+data/token.json
+
+*.json
+# Local data files
+data/
+
+# Logs
+*.log
+
+# Python cache
+__pycache__/
